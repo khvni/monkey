@@ -304,6 +304,14 @@ final class CuaDriverClient {
     /// Read-only; works without the daemon/TCC.
     func listWindows() async throws -> [CuaWindow] {
         let data = try await call(tool: "list_windows", json: [:])
+        return try Self.decodeWindows(from: data)
+    }
+
+    /// Pure, side-effect-free decode of a `list_windows` response payload into
+    /// `[CuaWindow]`. Extracted so the wire decoding can be asserted directly in
+    /// tests without shelling out to the driver. Throws `CuaDriverError.decodeFailed`
+    /// on a malformed payload, matching `listWindows()`'s original behavior.
+    static func decodeWindows(from data: Data) throws -> [CuaWindow] {
         do {
             let envelope = try JSONDecoder().decode(ListWindowsEnvelope.self, from: data)
             return envelope.windows
@@ -517,7 +525,7 @@ final class CuaDriverClient {
 
     /// Serialize a `[String: Any]` argument dictionary into a compact JSON string
     /// (no pretty-printing, sorted keys for deterministic output).
-    private static func compactJSONString(from json: [String: Any]) throws -> String {
+    static func compactJSONString(from json: [String: Any]) throws -> String {
         // An empty argument set is still valid JSON: "{}".
         if json.isEmpty { return "{}" }
         do {

@@ -60,8 +60,13 @@ final class MonkeyTraceRecorder {
     ///   - transcript: The raw voice transcript behind the task. Persisted to `transcript.txt`.
     ///   - slug: A short, human-readable, filesystem-safe-ish label for the run. Sanitized
     ///           before use so callers do not have to pre-clean it.
-    init(task: String, transcript: String, slug: String) {
-        let runsBaseDirectory = MonkeyTraceRecorder.resolveRunsBaseDirectory()
+    ///   - baseDirectoryOverride: Test-only injection point for the `runs/` base directory.
+    ///           When non-nil it is used verbatim as the base (and created if missing),
+    ///           letting tests write into a temp dir. When nil (the default, and the
+    ///           only value production ever passes) resolution is unchanged: the
+    ///           `MONKEYBOT_RUNS_DIR` env var if set, else `~/Documents/Monkeybot/runs`.
+    init(task: String, transcript: String, slug: String, baseDirectoryOverride: URL? = nil) {
+        let runsBaseDirectory = MonkeyTraceRecorder.resolveRunsBaseDirectory(override: baseDirectoryOverride)
         let timestamp = MonkeyTraceRecorder.makeTimestampComponent()
         let safeSlug = MonkeyTraceRecorder.sanitizeSlug(slug)
 
@@ -262,14 +267,18 @@ final class MonkeyTraceRecorder {
 
     /// Resolves the base `runs/` directory and ensures it exists.
     ///
-    /// Default base is `~/Documents/Monkeybot/runs`. An explicit override may be supplied
-    /// via the `MONKEYBOT_RUNS_DIR` environment variable (treated as the `runs/` base
-    /// directory directly), keeping the base configurable per the contract.
-    private static func resolveRunsBaseDirectory() -> URL {
+    /// Resolution order:
+    ///  1. An explicit `override` URL (test injection) — used verbatim as the base.
+    ///  2. The `MONKEYBOT_RUNS_DIR` environment variable (treated as the `runs/`
+    ///     base directory directly), keeping the base configurable per the contract.
+    ///  3. Default: `~/Documents/Monkeybot/runs`.
+    private static func resolveRunsBaseDirectory(override: URL? = nil) -> URL {
         let fileManager = FileManager.default
 
         let baseDirectory: URL
-        if let override = ProcessInfo.processInfo.environment["MONKEYBOT_RUNS_DIR"], !override.isEmpty {
+        if let override {
+            baseDirectory = override
+        } else if let override = ProcessInfo.processInfo.environment["MONKEYBOT_RUNS_DIR"], !override.isEmpty {
             baseDirectory = URL(fileURLWithPath: override, isDirectory: true)
         } else {
             let documentsDirectory: URL

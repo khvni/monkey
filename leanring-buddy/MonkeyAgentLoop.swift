@@ -486,6 +486,22 @@ final class MonkeyAgentLoop: ObservableObject {
     ///  4. Fall back to the largest Chrome window overall.
     private func locateFrontmostChromeWindow() async throws -> CuaWindow? {
         let windows = try await cuaDriverClient.listWindows()
+        return Self.selectTargetWindow(from: windows)
+    }
+
+    /// Pure, side-effect-free window-selection heuristic extracted from
+    /// `locateFrontmostChromeWindow()` so it can be unit-tested directly.
+    /// Same priority order:
+    ///  1. Keep only Google Chrome windows.
+    ///  2. Strongly prefer the window whose title mentions the demo target
+    ///     ("Clay") so a multi-window setup lands on the right tab — largest
+    ///     such window by area.
+    ///  3. Otherwise prefer on-screen windows that have a non-empty title
+    ///     (a real browser frame, not a helper), and among those pick the
+    ///     largest by area.
+    ///  4. Fall back to the largest Chrome window overall.
+    ///  5. nil when there are no Chrome windows at all.
+    static func selectTargetWindow(from windows: [CuaWindow]) -> CuaWindow? {
         let chromeWindows = windows.filter {
             $0.appName.localizedCaseInsensitiveContains("Chrome")
         }
@@ -849,7 +865,7 @@ final class MonkeyAgentLoop: ObservableObject {
     /// (so it can scroll or narrow rather than assume it saw everything). Keeps
     /// huge Clay tables from blowing up the prompt without hiding elements by
     /// keyword. ~12k chars ≈ a few thousand tokens.
-    private static func capObservation(_ markdown: String, limit: Int = 12_000) -> String {
+    static func capObservation(_ markdown: String, limit: Int = 12_000) -> String {
         guard markdown.count > limit else { return markdown }
         let head = String(markdown.prefix(limit))
         return head + "\n\n…[observation truncated to \(limit) characters — scroll to reveal more elements, or narrow the task]"
@@ -891,7 +907,7 @@ final class MonkeyAgentLoop: ObservableObject {
             .path
     }
 
-    private static func makeTraceSlug(fromTask task: String) -> String {
+    static func makeTraceSlug(fromTask task: String) -> String {
         let lowered = task.lowercased()
         let allowed = lowered.map { character -> Character in
             if character.isLetter || character.isNumber { return character }
@@ -904,7 +920,7 @@ final class MonkeyAgentLoop: ObservableObject {
         return trimmed.isEmpty ? "task" : trimmed
     }
 
-    private static func statusLine(for action: MonkeyAction) -> String {
+    static func statusLine(for action: MonkeyAction) -> String {
         switch action.action {
         case .click:
             if let index = action.elementIndex { return "clicking [\(index)]" }
@@ -933,7 +949,7 @@ final class MonkeyAgentLoop: ObservableObject {
         }
     }
 
-    private static func actionSummary(for action: MonkeyAction) -> String {
+    static func actionSummary(for action: MonkeyAction) -> String {
         let base: String
         switch action.action {
         case .click:
@@ -970,7 +986,7 @@ final class MonkeyAgentLoop: ObservableObject {
     }
 
     /// Cheap post-action delta used as the per-step verification note.
-    private static func verificationDelta(before: CuaObservation, after: CuaObservation) -> String {
+    static func verificationDelta(before: CuaObservation, after: CuaObservation) -> String {
         let elementDelta = after.elementCount - before.elementCount
         let elementNote: String
         if elementDelta > 0 {
@@ -986,14 +1002,14 @@ final class MonkeyAgentLoop: ObservableObject {
             : "UI unchanged: \(elementNote)"
     }
 
-    private static func format(seconds: Double) -> String {
+    static func format(seconds: Double) -> String {
         if seconds == seconds.rounded() {
             return String(Int(seconds))
         }
         return String(format: "%.1f", seconds)
     }
 
-    private static func truncate(_ text: String, to maxLength: Int) -> String {
+    static func truncate(_ text: String, to maxLength: Int) -> String {
         guard text.count > maxLength else { return text }
         return String(text.prefix(maxLength)) + "…"
     }
