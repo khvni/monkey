@@ -360,22 +360,47 @@ final class MenuBarPanelManager: NSObject {
     }
 
     /// Hides the HUD after a short grace period if nothing is running/listening.
+    /// Keeps the HUD visible when there is a saved run to re-run, so the Re-run
+    /// control and trace path stay reachable; the user can still close it via
+    /// the HUD's close button.
     private func scheduleMonkeybotHUDHideIfIdle() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
             guard let self else { return }
             guard !self.isMonkeybotLoopRunning, !self.companionManager.isHandsFreeModeActive else { return }
+            guard !self.companionManager.hasSavedRunToRerun else { return }
             self.hideMonkeybotHUD()
         }
     }
 
     private func showMonkeybotHUD() {
         guard companionManager.monkeyAgentLoop != nil else { return }
+        let isFirstShow = monkeybotHUDPanel == nil
         if monkeybotHUDPanel == nil {
             createMonkeybotHUDPanel()
         }
+        guard let hudPanel = monkeybotHUDPanel else { return }
+
         positionMonkeybotHUD()
-        monkeybotHUDPanel?.makeKeyAndOrderFront(nil)
-        monkeybotHUDPanel?.orderFrontRegardless()
+
+        // On first show, start fully transparent so the HUD fades in instead of
+        // popping in with a hard cut.
+        if isFirstShow {
+            hudPanel.alphaValue = 0
+        }
+        hudPanel.makeKeyAndOrderFront(nil)
+        hudPanel.orderFrontRegardless()
+
+        // The panel's fitting size is only accurate once its hosting view has
+        // been realized on screen, so reposition after ordering front to avoid
+        // clipping the footer on the very first show.
+        positionMonkeybotHUD()
+
+        if isFirstShow {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = DS.Animation.normal
+                hudPanel.animator().alphaValue = 1
+            }
+        }
     }
 
     private func hideMonkeybotHUD() {

@@ -18,6 +18,8 @@
       --accent-soft: #eef0ff;
       --success: #047857;
       --success-soft: #ecfdf5;
+      --warning: #b45309;
+      --warning-soft: #fffbeb;
       --radius: 10px;
       --shadow: 0 10px 40px rgba(20, 24, 33, 0.18);
       --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -261,7 +263,15 @@
     }
 
     #status.is-saved {
+      color: var(--success);
       background: var(--success-soft);
+      padding: 6px 12px;
+      border-radius: 999px;
+    }
+
+    #status.is-warning {
+      color: var(--warning);
+      background: var(--warning-soft);
       padding: 6px 12px;
       border-radius: 999px;
     }
@@ -426,19 +436,48 @@
     (function () {
       var saveButton = document.getElementById('save');
       var statusEl = document.getElementById('status');
+      var mappingSelects = document.querySelectorAll('select.select');
+
+      // Clear any stale status when the page first loads so a re-run of the
+      // workflow starts from a clean slate (no leftover "Saved ✓"). This
+      // inline script may execute after DOMContentLoaded has already fired,
+      // so clear immediately in that case and otherwise wait for the event.
+      function clearStatusOnLoad() {
+        statusEl.textContent = '';
+        statusEl.classList.remove('is-saved', 'is-warning');
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', clearStatusOnLoad);
+      } else {
+        clearStatusOnLoad();
+      }
 
       saveButton.addEventListener('click', function () {
-        statusEl.textContent = 'Saved ✓';
-        statusEl.classList.add('is-saved');
+        // Honest Save signal: only report success when every Clay field has
+        // been mapped to a column. A blank (default) select means the mapping
+        // is incomplete, so show a warning instead of a misleading "Saved ✓".
+        var allFieldsMapped = Array.prototype.every.call(mappingSelects, function (selectEl) {
+          return selectEl.value !== '';
+        });
+
+        if (allFieldsMapped) {
+          statusEl.textContent = 'Saved ✓';
+          statusEl.classList.add('is-saved');
+          statusEl.classList.remove('is-warning');
+        } else {
+          statusEl.textContent = 'Map all fields first';
+          statusEl.classList.add('is-warning');
+          statusEl.classList.remove('is-saved');
+        }
       });
 
-      // Clear the saved signal if the user changes anything afterward, so a
+      // Clear the status signal if the user changes anything afterward, so a
       // re-run of the workflow re-produces the signal rather than reading a stale one.
       var inputs = document.querySelectorAll('#sheet-url, select.select');
       inputs.forEach(function (el) {
         el.addEventListener('change', function () {
           statusEl.textContent = '';
-          statusEl.classList.remove('is-saved');
+          statusEl.classList.remove('is-saved', 'is-warning');
         });
       });
     })();

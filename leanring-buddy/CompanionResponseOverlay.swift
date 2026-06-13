@@ -195,23 +195,68 @@ private struct CompanionResponseOverlayView: View {
 
     var body: some View {
         if viewModel.isShowingResponse {
-            Text(viewModel.streamingResponseText.isEmpty ? "..." : viewModel.streamingResponseText)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundColor(DS.Colors.textPrimary)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 300, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(DS.Colors.surface1.opacity(0.95))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(DS.Colors.borderSubtle.opacity(0.5), lineWidth: 0.8)
-                        )
-                        .shadow(color: Color.black.opacity(0.35), radius: 16, x: 0, y: 8)
-                )
+            Group {
+                if viewModel.streamingResponseText.isEmpty {
+                    // While we wait for the first streamed token, show a subtle
+                    // animated typing indicator instead of a literal "..." which
+                    // reads as a placeholder bug.
+                    TypingIndicatorView()
+                } else {
+                    Text(viewModel.streamingResponseText)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 300, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(DS.Colors.surface1.opacity(0.95))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(DS.Colors.borderSubtle.opacity(0.5), lineWidth: 0.8)
+                    )
+                    .shadow(color: Color.black.opacity(0.35), radius: 16, x: 0, y: 8)
+            )
+        }
+    }
+}
+
+// MARK: - Typing Indicator
+
+/// Three dots that pulse in sequence to signal that a response is on its way.
+/// Used as the empty-state placeholder before the first streamed token arrives.
+private struct TypingIndicatorView: View {
+    @State private var animationIsActive: Bool = false
+
+    private let dotCount: Int = 3
+    private let dotDiameter: CGFloat = 6
+    private let dotSpacing: CGFloat = 5
+    private let pulseDuration: Double = 0.6
+    private let perDotDelay: Double = 0.18
+
+    var body: some View {
+        HStack(spacing: dotSpacing) {
+            ForEach(0..<dotCount, id: \.self) { dotIndex in
+                Circle()
+                    .fill(DS.Colors.textSecondary)
+                    .frame(width: dotDiameter, height: dotDiameter)
+                    .opacity(animationIsActive ? 1.0 : 0.3)
+                    .scaleEffect(animationIsActive ? 1.0 : 0.7)
+                    .animation(
+                        .easeInOut(duration: pulseDuration)
+                            .repeatForever(autoreverses: true)
+                            .delay(perDotDelay * Double(dotIndex)),
+                        value: animationIsActive
+                    )
+            }
+        }
+        .frame(maxWidth: 300, alignment: .leading)
+        .onAppear {
+            animationIsActive = true
         }
     }
 }

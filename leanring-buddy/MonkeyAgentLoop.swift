@@ -104,8 +104,8 @@ final class MonkeyAgentLoop: ObservableObject {
 
     /// Number of screenshots from the most recent observations to keep in the
     /// model's context. Disk retains every artifact; the model only needs the
-    /// freshest few to stay grounded without blowing up the prompt.
-    private let recentScreenshotWindowSize: Int = 3
+    /// freshest one to stay grounded without blowing up the prompt.
+    private let recentScreenshotWindowSize: Int = 1
 
     init(cua: CuaDriverClient, runtime: AgentRuntime, maxSteps: Int = 20) {
         self.cuaDriverClient = cua
@@ -265,7 +265,7 @@ final class MonkeyAgentLoop: ObservableObject {
         var stepNumber = 1
         while stepNumber <= maximumStepCount {
             if stopRequested {
-                await finishStopped(recorder: traceRecorder)
+                await finishStopped(completedStepCount: priorStepRecords.count, recorder: traceRecorder)
                 return
             }
 
@@ -300,7 +300,7 @@ final class MonkeyAgentLoop: ObservableObject {
             }
 
             if stopRequested {
-                await finishStopped(recorder: traceRecorder)
+                await finishStopped(completedStepCount: priorStepRecords.count, recorder: traceRecorder)
                 return
             }
 
@@ -386,7 +386,7 @@ final class MonkeyAgentLoop: ObservableObject {
             }
 
             if stopRequested {
-                await finishStopped(recorder: traceRecorder)
+                await finishStopped(completedStepCount: priorStepRecords.count, recorder: traceRecorder)
                 return
             }
 
@@ -494,8 +494,9 @@ final class MonkeyAgentLoop: ObservableObject {
     /// Same priority order:
     ///  1. Keep only Google Chrome windows.
     ///  2. Strongly prefer the window whose title mentions the demo target
-    ///     ("Clay") so a multi-window setup lands on the right tab — largest
-    ///     such window by area.
+    ///     ("Clay") so a multi-window setup lands on the right tab — among
+    ///     those prefer an on-screen window first (so a stale/off-screen
+    ///     duplicate can't win), then break ties by largest area.
     ///  3. Otherwise prefer on-screen windows that have a non-empty title
     ///     (a real browser frame, not a helper), and among those pick the
     ///     largest by area.
@@ -509,10 +510,17 @@ final class MonkeyAgentLoop: ObservableObject {
 
         func area(_ window: CuaWindow) -> Double { window.bounds.width * window.bounds.height }
 
-        // 2. Title mentions the demo target — pick the largest such window.
+        // 2. Title mentions the demo target — prefer an on-screen window first
+        //    (so a stale/off-screen duplicate "clay" window can't win over the
+        //    visible one), then break ties by largest area.
         let clayWindows = chromeWindows
             .filter { $0.title.localizedCaseInsensitiveContains("clay") }
-            .sorted { area($0) > area($1) }
+            .sorted { lhsWindow, rhsWindow in
+                if lhsWindow.isOnScreen != rhsWindow.isOnScreen {
+                    return lhsWindow.isOnScreen
+                }
+                return area(lhsWindow) > area(rhsWindow)
+            }
         if let clayWindow = clayWindows.first { return clayWindow }
 
         // 3. On-screen real browser frames (non-empty title), largest first.
@@ -786,9 +794,14 @@ final class MonkeyAgentLoop: ObservableObject {
         state.lastActionSummary = summary
     }
 
-    private func finishStopped(recorder: MonkeyTraceRecorder) async {
+    /// `completedStepCount` is the number of steps ACTUALLY recorded (the count of
+    /// `priorStepRecords`), not `state.stepNumber`. `state.stepNumber` is advanced
+    /// to the in-flight step at the top of each loop iteration before that step is
+    /// recorded, so reporting it here would over-count by one whenever the stop is
+    /// observed at a loop boundary before the current step landed.
+    private func finishStopped(completedStepCount: Int, recorder: MonkeyTraceRecorder) async {
         await stopCuaRecordingBestEffort()
-        let summary = "Stopped by user after \(state.stepNumber) step(s)."
+        let summary = "Stopped by user after \(completedStepCount) step(s)."
         recorder.finalize(summary: summary)
         state.isRunning = false
         state.statusLine = "stopped"

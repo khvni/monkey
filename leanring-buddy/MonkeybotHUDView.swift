@@ -59,6 +59,8 @@ struct MonkeybotHUDView: View {
             header
             divider
             detailRows
+            pendingUserQuestionCallout
+            failureBanner
             rerunRow
             divider
             footer
@@ -173,14 +175,14 @@ struct MonkeybotHUDView: View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             detailRow(label: "Task", value: taskText, valueLineLimit: 2)
             detailRow(label: "Target", value: targetText)
-            detailRow(label: "Step", value: stepText)
-            detailRow(label: "Last action", value: lastActionText, valueLineLimit: 2)
+            detailRow(label: "Step", value: stepText, help: stepDetail)
+            detailRow(label: "Last action", value: lastActionText, valueLineLimit: 2, help: rawLastActionText)
         }
     }
 
     /// One label/value row rendered on a `surface2` card with a subtle border,
     /// matching the row treatment used elsewhere in the panel.
-    private func detailRow(label: String, value: String, valueLineLimit: Int = 1) -> some View {
+    private func detailRow(label: String, value: String, valueLineLimit: Int = 1, help: String? = nil) -> some View {
         HStack(alignment: .top, spacing: DS.Spacing.sm) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
@@ -205,6 +207,76 @@ struct MonkeybotHUDView: View {
             RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
                 .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
         )
+        // Carry the untruncated / raw detail (e.g. the full status line with its
+        // AX index) on hover so humanizing the visible text never hides it.
+        .help(help ?? "")
+    }
+
+    // MARK: - Pending question callout + failure banner
+
+    /// Prominent amber callout surfaced only when the loop paused to ask the user
+    /// a question (an `ask_user` action). Shows the full question text (up to 3
+    /// lines) so the user knows what the agent needs before continuing.
+    @ViewBuilder
+    private var pendingUserQuestionCallout: some View {
+        if let pendingUserQuestion = loop.state.pendingUserQuestion,
+           !pendingUserQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(DS.Colors.warningText)
+
+                Text(pendingUserQuestion)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.vertical, DS.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .fill(DS.Colors.warning.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .stroke(DS.Colors.warning.opacity(0.35), lineWidth: 0.5)
+            )
+        }
+    }
+
+    /// Red error banner surfaced only when the run ended in an unrecoverable
+    /// failure. Truncates the inline text but carries the full message via `.help`
+    /// so a long failure reason stays accessible on hover.
+    @ViewBuilder
+    private var failureBanner: some View {
+        if isFailed, let failureMessage = loop.state.failureMessage {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(DS.Colors.destructiveText)
+
+                Text(failureMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.vertical, DS.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .fill(DS.Colors.destructive.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .stroke(DS.Colors.destructive.opacity(0.35), lineWidth: 0.5)
+            )
+            .help(failureMessage)
+        }
     }
 
     // MARK: - Footer (Save Trace indicator + Stop button)
@@ -263,7 +335,53 @@ struct MonkeybotHUDView: View {
 
     // MARK: - Derived display values
 
-    /// Current run state, distinguishing hands-free listening from an active run.
+    /// Whether the most recent run ended in an unrecoverable failure.
+    private var isFailed: Bool {
+        if let failureMessage = loop.state.failureMessage {
+            return !failureMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return false
+    }
+
+    /// Whether the loop paused to ask the user a question (an `ask_user` action).
+    private var hasPendingUserQuestion: Bool {
+        if let pendingUserQuestion = loop.state.pendingUserQuestion {
+            return !pendingUserQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return false
+    }
+
+    /// Whether the run halted because it hit the step limit, detected from the
+    /// status line the loop publishes when it terminates that way.
+    private var didReachStepLimit: Bool {
+        loop.state.statusLine
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .contains("step limit reached")
+    }
+
+    /// Whether the run was explicitly stopped by the user, detected from the
+    /// status line the loop publishes after a cooperative cancel.
+    private var wasStopped: Bool {
+        loop.state.statusLine
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .contains("stopped")
+    }
+
+    /// Whether a finished (not running) run produced a result summary, used to
+    /// distinguish a completed run ("Done") from an untouched idle state.
+    private var hasCompletedSummary: Bool {
+        // A trace directory is only ever set after a run actually executed, so its
+        // presence on a not-running loop means the run reached a terminal "Done".
+        hasTrace
+    }
+
+    /// Current run state. Terminal states (Failed / Needs you / Step limit /
+    /// Stopped / Done) are derived from the loop state so a finished-but-not-idle
+    /// run no longer shows a misleading green "Idle" pill. While the loop is
+    /// actively running it always reads "Running"; hands-free listening before a
+    /// run starts reads "Listening".
     private var statusText: String {
         if loop.state.isRunning {
             return "Running"
@@ -271,14 +389,36 @@ struct MonkeybotHUDView: View {
         if isHandsFreeListening {
             return "Listening"
         }
+        if isFailed {
+            return "Failed"
+        }
+        if hasPendingUserQuestion {
+            return "Needs you"
+        }
+        if didReachStepLimit {
+            return "Step limit"
+        }
+        if wasStopped {
+            return "Stopped"
+        }
+        if hasCompletedSummary {
+            return "Done"
+        }
         return "Idle"
     }
 
-    /// Status-dot / pill color per architect DS facts: running & listening use
-    /// blue400, idle/done use success green.
+    /// Status-dot / pill color. Running & listening use blue400; a failed run uses
+    /// DS destructive red; a run awaiting the user or stopped at a limit uses DS
+    /// warning amber; a completed or fresh-idle run uses success green.
     private var statusColor: Color {
         if loop.state.isRunning || isHandsFreeListening {
             return DS.Colors.blue400
+        }
+        if isFailed {
+            return DS.Colors.destructive
+        }
+        if hasPendingUserQuestion || didReachStepLimit {
+            return DS.Colors.warning
         }
         return DS.Colors.success
     }
@@ -293,16 +433,60 @@ struct MonkeybotHUDView: View {
         return target.isEmpty ? "—" : target
     }
 
-    /// "n / max", with the status line appended when present (e.g. "3 / 20 · clicking [12]").
+    /// "n / max", with a humanized status line appended when present (e.g.
+    /// "3 / 20 · Clicking" rather than the raw "3 / 20 · clicking [12]"). The
+    /// full raw status (with its AX index) is preserved in `stepDetail` for hover.
     private var stepText: String {
+        let count = "\(loop.state.stepNumber) / \(loop.state.maxSteps)"
+        let status = humanizedAction(loop.state.statusLine)
+        return status.isEmpty ? count : "\(count)  ·  \(status)"
+    }
+
+    /// Full, untruncated step detail surfaced on hover: the raw status line
+    /// (including the trailing ` [N]` AX index) appended to the step count.
+    private var stepDetail: String {
         let count = "\(loop.state.stepNumber) / \(loop.state.maxSteps)"
         let status = loop.state.statusLine.trimmingCharacters(in: .whitespacesAndNewlines)
         return status.isEmpty ? count : "\(count)  ·  \(status)"
     }
 
+    /// Humanized last action for display: title-cased verb with the trailing
+    /// ` [N]` AX index stripped. The raw text remains available via `rawLastActionText`.
     private var lastActionText: String {
-        let last = loop.state.lastActionSummary.trimmingCharacters(in: .whitespacesAndNewlines)
-        return last.isEmpty ? "—" : last
+        let humanized = humanizedAction(loop.state.lastActionSummary)
+        return humanized.isEmpty ? "—" : humanized
+    }
+
+    /// The raw, untruncated last-action summary surfaced on hover.
+    private var rawLastActionText: String {
+        let raw = loop.state.lastActionSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? "—" : raw
+    }
+
+    /// Humanize a loop action/status string for display: strip a trailing ` [N]`
+    /// AX element index and title-case the leading verb (e.g. "clicking [12]" →
+    /// "Clicking"). Anything after the first whitespace token is left untouched so
+    /// human-readable suffixes (labels, targets) survive intact.
+    private func humanizedAction(_ rawAction: String) -> String {
+        var action = rawAction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !action.isEmpty else { return "" }
+
+        // Strip a trailing AX element index like " [12]" used internally for
+        // addressing — it is noise for a human reading the HUD.
+        if let bracketRange = action.range(of: #"\s*\[\d+\]\s*$"#, options: .regularExpression) {
+            action.removeSubrange(bracketRange)
+        }
+        action = action.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !action.isEmpty else { return "" }
+
+        // Title-case only the leading verb so trailing detail (targets, labels)
+        // keeps its original casing.
+        if let firstSpaceIndex = action.firstIndex(where: { $0 == " " }) {
+            let verb = String(action[..<firstSpaceIndex]).capitalized
+            let remainder = String(action[firstSpaceIndex...])
+            return verb + remainder
+        }
+        return action.capitalized
     }
 
     private var hasTrace: Bool {

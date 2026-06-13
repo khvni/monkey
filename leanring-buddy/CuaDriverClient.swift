@@ -957,6 +957,15 @@ extension CuaDriverClient {
         if let windowId { return "\(pid):\(windowId)" }
         return "\(pid):any"
     }
+
+    /// Clear the cached browser-grounding probe results so the next run re-probes
+    /// from scratch. Called when the user may have toggled Chrome's "Allow
+    /// JavaScript from Apple Events" mid-session — without this, a cached `false`
+    /// from an earlier probe would keep the loop AX-only even after grounding
+    /// became available.
+    static func resetBrowserGroundingCache() {
+        browserGroundingCache.removeAll()
+    }
 }
 
 // MARK: - Feature 3b: Optional cua trajectory recording (best-effort wrappers)
