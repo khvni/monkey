@@ -22,29 +22,31 @@ Run through every item. Any unchecked item is a likely live failure.
    - The Google Sheet side of the mapping is reachable from this same Clay view (the mapping
      panel/dropdowns are visible or one scroll away).
 
-2. **cua-driver daemon running.** Confirm:
+2. **REQUIRED — enable Chrome web automation.** In Chrome: **View ▸ Developer ▸ Allow JavaScript from Apple Events** (toggle on; Chrome restarts). Without this, hands-on testing confirmed Chrome exposes the *wrong tab* to the accessibility tree and the DOM tool is blocked — so Monkeybot can't reliably see Clay's fields. With it on, Monkeybot drives Clay through the page DOM. (The Monkeybot panel shows this hint too. See `TEST_RESULTS.md` for the evidence.) Native (non-browser) apps don't need this.
+
+3. **cua-driver daemon running.** Confirm:
    ```
    cua-driver status        # expect "running"
    ```
    If it is not running, start it before anything else.
 
-3. **TCC permissions granted** (Accessibility + Screen Recording) for the app.
+4. **TCC permissions granted** (Accessibility + Screen Recording) for the app.
    - Do NOT run `xcodebuild` from the terminal at any point — it invalidates TCC and you
      will fail `get_window_state` live. Launch the already-built app instead.
 
-4. **Worker URL is set.** Open `leanring-buddy/CompanionManager.swift` and confirm
+5. **Worker URL is set.** Open `leanring-buddy/CompanionManager.swift` and confirm
    `workerBaseURL` (line ~73) is your **deployed Cloudflare Worker URL**, NOT the placeholder
    `https://your-worker-name.your-subdomain.workers.dev`. Both the Clay brain and Clicky
    route through this; with the placeholder, **every turn fails on step 1.**
    - Also confirm the Worker forwards a model id your account is entitled to
      (`selectedModel` defaults to `claude-sonnet-4-6`).
 
-5. **Monkeybot mode toggle ON.** Open the companion panel and flip the Monkeybot toggle on.
+6. **Monkeybot mode toggle ON.** Open the companion panel and flip the Monkeybot toggle on.
    - The panel shows a preflight status row. Wait for it to read
      **"Ready: daemon running, Accessibility + Screen Recording granted"** (green dot).
    - Preflight is *advisory only* — it will not block a run — so do not skip reading it.
 
-6. **Mic works**, room is quiet enough for AssemblyAI to get a clean transcript.
+7. **Mic works**, room is quiet enough for AssemblyAI to get a clean transcript.
 
 > Optional safety net: open `~/Documents/Monkeybot/runs/` in Finder so you can show a prior
 > successful run's trace if the live run stalls (see Fallback).
