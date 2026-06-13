@@ -64,4 +64,4 @@ Every run is recorded by `MonkeyTraceRecorder.swift` under `~/Documents/Monkeybo
 - `screenshots/NN.png` — the screenshot captured each step
 - `final_summary.md` — the terminal outcome
 
-The result is a durable, human-readable record of *how* a task was accomplished on a real SaaS UI — a workflow you can review, audit, and replay rather than a fragile click macro. All trace writes are best-effort and never throw into the loop, and the trace directory is published live into the HUD while the run is in progress.
+The result is a durable, human-readable record of *how* a task was accomplished on a real SaaS UI — a workflow you can review, audit, and re-run (Monkeybot re-decides each step against fresh snapshots — not a passive action replay) rather than a fragile click macro. All trace writes are best-effort and never throw into the loop, and the trace directory is published live into the HUD while the run is in progress.

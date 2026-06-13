@@ -119,9 +119,52 @@ final class ClaudeAgentRuntime: AgentRuntime {
 
     // MARK: - Prompt construction
 
+    /// Whether browser/DOM grounding is active THIS turn.
+    ///
+    /// The agent loop enriches the observation with a CSS-addressable DOM digest
+    /// (under `MonkeyAgentLoop.domDigestHeader`) ONLY when the cua `page` tool is
+    /// usable for the run. Detecting that header is how the runtime stays in lock-
+    /// step with the loop WITHOUT a new AgentContext field: when the header is
+    /// absent (the v0.2.0 AX-only path) the prompt omits `css_selector` entirely,
+    /// so model behavior is byte-for-byte identical to v0.2.0.
+    private static func isBrowserGroundingActive(context: AgentContext) -> Bool {
+        context.observationMarkdown.contains(MonkeyAgentLoop.domDigestHeader)
+    }
+
     /// System prompt: role, the cua action schema (EXACT JSON keys from MonkeyAction),
     /// the one-object-no-prose hard rule, and the snapshot-scoped element_index rule.
+    ///
+    /// When browser grounding is active, an ADDITIVE `css_selector` clause is woven
+    /// into the `click` documentation; when inactive it is omitted entirely.
     private static func buildSystemPrompt(context: AgentContext) -> String {
+        let browserGroundingActive = isBrowserGroundingActive(context: context)
+
+        // Additive clause appended to the `click` action docs only when the page
+        // tool is live. Empty string in the AX-only path → identical to v0.2.0.
+        let clickCssSelectorClause = browserGroundingActive
+            ? """
+
+                           For WEB elements you may instead supply "css_selector" (string) — a \
+            CSS selector for the page's DOM. Prefer a STABLE selector such as "#id" or an \
+            "[aria-label]" selector drawn from the "\(MonkeyAgentLoop.domDigestHeader)" section of \
+            the current observation. The executor clicks it through the browser page tool and \
+            falls back to accessibility targeting automatically if that fails, so still prefer \
+            "element_index" when a clear accessibility element exists.
+            """
+            : ""
+
+        // A short note in the strategy section, again only when grounding is live.
+        let browserGroundingStrategyNote = browserGroundingActive
+            ? """
+
+                - Browser grounding is ACTIVE: the observation includes a \
+            "\(MonkeyAgentLoop.domDigestHeader)" section listing web elements you can click by \
+            "css_selector" (prefer "#id" or "[aria-label]"). This is OPTIONAL — "element_index" \
+            from the accessibility tree still works for everything. For typing into web inputs \
+            keep using "type_text" (NOT set_value, NOT css_selector).
+            """
+            : ""
+
         return """
         You are Monkeybot, an autonomous macOS UI agent. You drive a real application by \
         emitting ONE structured action at a time. A separate executor runs each action \
@@ -158,7 +201,7 @@ final class ClaudeAgentRuntime: AgentRuntime {
                            Required: EITHER "element_index" (int) OR both "x" (number) and \
         "y" (number).
                            Prefer "element_index" from the CURRENT observation. Use raw \
-        "x"/"y" screen coordinates ONLY when no accessibility element matches.
+        "x"/"y" screen coordinates ONLY when no accessibility element matches.\(clickCssSelectorClause)
         - type_text      : type characters into a text field. THIS IS THE DEFAULT for \
         all free-form text entry, including web/Chrome inputs (Clay cells, search boxes, \
         forms). cua synthesizes real keystrokes here, which web pages actually receive.
@@ -198,7 +241,7 @@ final class ClaudeAgentRuntime: AgentRuntime {
         - When the goal is achieved, emit a "done" action with a clear "summary".
         - If a required control is missing, ambiguous, or you need a human decision, emit \
         "ask_user" rather than guessing destructively.
-        - Stay within \(context.maxSteps) steps; be decisive.
+        - Stay within \(context.maxSteps) steps; be decisive.\(browserGroundingStrategyNote)
 
         # EXAMPLES (shape only — match the current observation, do not copy indices)
         {"action":"click","element_index":12,"reason":"open the search field"}

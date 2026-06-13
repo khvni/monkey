@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Title MUST contain "Clay" so Monkeybot's window picker (title contains "clay") lands here. -->
+  <title>Clay — Field Mapping (Mock)</title>
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --modal-bg: #ffffff;
+      --border: #e3e5e9;
+      --border-strong: #c9cdd6;
+      --text: #1c2024;
+      --text-muted: #6b7280;
+      --accent: #4f46e5;
+      --accent-hover: #4338ca;
+      --accent-soft: #eef0ff;
+      --success: #047857;
+      --success-soft: #ecfdf5;
+      --radius: 10px;
+      --shadow: 0 10px 40px rgba(20, 24, 33, 0.18);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+    }
+
+    body {
+      font-family: var(--font);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 80% -10%, #e8eaff 0%, transparent 55%),
+        radial-gradient(900px 500px at -10% 110%, #e6fbf3 0%, transparent 50%),
+        var(--bg);
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 20px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .modal {
+      width: 100%;
+      max-width: 640px;
+      background: var(--modal-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .modal__header {
+      padding: 22px 28px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .brand__mark {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      background: linear-gradient(135deg, var(--accent) 0%, #7c6cf0 100%);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .brand__name {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      color: var(--text);
+    }
+
+    .brand__badge {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 3px 8px;
+      border-radius: 999px;
+    }
+
+    .modal__title {
+      margin: 0;
+      font-size: 19px;
+      font-weight: 650;
+    }
+
+    .modal__subtitle {
+      margin: 6px 0 0;
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .modal__body {
+      padding: 22px 28px 8px;
+    }
+
+    .field {
+      margin-bottom: 22px;
+    }
+
+    .field__label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+      letter-spacing: 0.2px;
+    }
+
+    .field__hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin: 4px 0 0;
+    }
+
+    .text-input {
+      width: 100%;
+      font-family: var(--font);
+      font-size: 14px;
+      color: var(--text);
+      padding: 10px 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      background: #fff;
+      transition: border-color 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .text-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      margin: 4px 0 14px;
+    }
+
+    .map-row {
+      display: grid;
+      grid-template-columns: 1fr 18px 1fr;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .map-row:first-of-type {
+      border-top: none;
+    }
+
+    .map-row__target {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .map-row__target-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .map-row__target-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .map-row__arrow {
+      color: var(--border-strong);
+      text-align: center;
+      font-size: 14px;
+      user-select: none;
+    }
+
+    .select {
+      width: 100%;
+      font-family: var(--font);
+      font-size: 13px;
+      color: var(--text);
+      padding: 9px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      background: #fff;
+      cursor: pointer;
+      appearance: auto;
+    }
+
+    .select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .modal__footer {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 28px 24px;
+      border-top: 1px solid var(--border);
+      margin-top: 8px;
+    }
+
+    .btn {
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 18px;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background-color 0.12s ease, border-color 0.12s ease;
+    }
+
+    .btn--primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn--primary:hover { background: var(--accent-hover); }
+    .btn--primary:active { transform: translateY(1px); }
+
+    .btn--ghost {
+      background: #fff;
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+
+    .btn--ghost:hover { background: var(--bg); }
+
+    #status {
+      margin-left: auto;
+      font-size: 14px;
+      font-weight: 600;
+      min-height: 20px;
+      color: var(--success);
+    }
+
+    #status.is-saved {
+      background: var(--success-soft);
+      padding: 6px 12px;
+      border-radius: 999px;
+    }
+  </style>
+</head>
+<body>
+  <main class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <header class="modal__header">
+      <div class="brand">
+        <span class="brand__mark" aria-hidden="true">C</span>
+        <span class="brand__name">Clay</span>
+        <span class="brand__badge">Import</span>
+      </div>
+      <h1 class="modal__title" id="modal-title">Map your Google Sheet columns</h1>
+      <p class="modal__subtitle">
+        Connect a Google Sheet, then map each Clay field to the matching column from your sheet.
+      </p>
+    </header>
+
+    <section class="modal__body">
+      <!-- Source sheet URL -->
+      <div class="field">
+        <label class="field__label" for="sheet-url">Google Sheet URL</label>
+        <input
+          class="text-input"
+          type="text"
+          id="sheet-url"
+          name="sheet-url"
+          placeholder="Paste Google Sheet URL"
+          aria-label="Google Sheet URL"
+          autocomplete="off"
+          spellcheck="false" />
+        <p class="field__hint">Example: https://docs.google.com/spreadsheets/d/…</p>
+      </div>
+
+      <p class="section-label">Field mapping</p>
+
+      <!-- Six labeled mapping rows: each Clay field -> a native <select> of sheet columns. -->
+
+      <!-- Row 1: Company Domain -->
+      <div class="map-row">
+        <div class="map-row__target">
+          <span class="map-row__target-label">Company Domain</span>
+          <span class="map-row__target-desc">Primary web domain</span>
+        </div>
+        <span class="map-row__arrow" aria-hidden="true">&rarr;</span>
+        <label for="map-company-domain" hidden>Company Domain column</label>
+        <select class="select" id="map-company-domain" name="map-company-domain" aria-label="Company Domain column">
+          <option value="">Select a column…</option>
+          <option value="Domain">Domain</option>
+          <option value="Website">Website</option>
+          <option value="Company URL">Company URL</option>
+          <option value="Web Address">Web Address</option>
+          <option value="Homepage">Homepage</option>
+          <option value="Site">Site</option>
+        </select>
+      </div>
+
+      <!-- Row 2: City -->
+      <div class="map-row">
+        <div class="map-row__target">
+          <span class="map-row__target-label">City</span>
+          <span class="map-row__target-desc">Headquarters city</span>
+        </div>
+        <span class="map-row__arrow" aria-hidden="true">&rarr;</span>
+        <label for="map-city" hidden>City column</label>
+        <select class="select" id="map-city" name="map-city" aria-label="City column">
+          <option value="">Select a column…</option>
+          <option value="City">City</option>
+          <option value="Town">Town</option>
+          <option value="HQ City">HQ City</option>
+          <option value="Location">Location</option>
+          <option value="Municipality">Municipality</option>
+        </select>
+      </div>
+
+      <!-- Row 3: LinkedIn URL -->
+      <div class="map-row">
+        <div class="map-row__target">
+          <span class="map-row__target-label">LinkedIn URL</span>
+          <span class="map-row__target-desc">Company LinkedIn profile</span>
+        </div>
+        <span class="map-row__arrow" aria-hidden="true">&rarr;</span>
+        <label for="map-linkedin-url" hidden>LinkedIn URL column</label>
+        <select class="select" id="map-linkedin-url" name="map-linkedin-url" aria-label="LinkedIn URL column">
+          <option value="">Select a column…</option>
+          <option value="LinkedIn">LinkedIn</option>
+          <option value="LinkedIn URL">LinkedIn URL</option>
+          <option value="LI Profile">LI Profile</option>
+          <option value="Social — LinkedIn">Social — LinkedIn</option>
+          <option value="Company LinkedIn">Company LinkedIn</option>
+        </select>
+      </div>
+
+      <!-- Row 4: Employee Count -->
+      <div class="map-row">
+        <div class="map-row__target">
+          <span class="map-row__target-label">Employee Count</span>
+          <span class="map-row__target-desc">Total headcount</span>
+        </div>
+        <span class="map-row__arrow" aria-hidden="true">&rarr;</span>
+        <label for="map-employee-count" hidden>Employee Count column</label>
+        <select class="select" id="map-employee-count" name="map-employee-count" aria-label="Employee Count column">
+          <option value="">Select a column…</option>
+          <option value="Employees">Employees</option>
+          <option value="Employee Count">Employee Count</option>
+          <option value="Headcount">Headcount</option>
+          <option value="Company Size">Company Size</option>
+          <option value="# Staff">&#35; Staff</option>
+          <option value="Team Size">Team Size</option>
+        </select>
+      </div>
+
+      <!-- Row 5: Industry -->
+      <div class="map-row">
+        <div class="map-row__target">
+          <span class="map-row__target-label">Industry</span>
+          <span class="map-row__target-desc">Primary sector</span>
+        </div>
+        <span class="map-row__arrow" aria-hidden="true">&rarr;</span>
+        <label for="map-industry" hidden>Industry column</label>
+        <select class="select" id="map-industry" name="map-industry" aria-label="Industry column">
+          <option value="">Select a column…</option>
+          <option value="Industry">Industry</option>
+          <option value="Sector">Sector</option>
+          <option value="Vertical">Vertical</option>
+          <option value="Category">Category</option>
+          <option value="Market">Market</option>
+        </select>
+      </div>
+
+      <!-- Row 6: Email -->
+      <div class="map-row">
+        <div class="map-row__target">
+          <span class="map-row__target-label">Email</span>
+          <span class="map-row__target-desc">Primary contact email</span>
+        </div>
+        <span class="map-row__arrow" aria-hidden="true">&rarr;</span>
+        <label for="map-email" hidden>Email column</label>
+        <select class="select" id="map-email" name="map-email" aria-label="Email column">
+          <option value="">Select a column…</option>
+          <option value="Email">Email</option>
+          <option value="Email Address">Email Address</option>
+          <option value="Contact Email">Contact Email</option>
+          <option value="Work Email">Work Email</option>
+          <option value="E-mail">E-mail</option>
+          <option value="Primary Email">Primary Email</option>
+        </select>
+      </div>
+    </section>
+
+    <footer class="modal__footer">
+      <button class="btn btn--ghost" id="cancel" type="button">Cancel</button>
+      <button class="btn btn--primary" id="save" type="button">Save mapping</button>
+      <span id="status" role="status" aria-live="polite"></span>
+    </footer>
+  </main>
+
+  <script>
+    // Minimal, no build step. On Save, show an observable "Saved" signal in #status
+    // so the agent loop's verification step has a concrete thing to read.
+    (function () {
+      var saveButton = document.getElementById('save');
+      var statusEl = document.getElementById('status');
+
+      saveButton.addEventListener('click', function () {
+        statusEl.textContent = 'Saved ✓';
+        statusEl.classList.add('is-saved');
+      });
+
+      // Clear the saved signal if the user changes anything afterward, so a
+      // re-run of the workflow re-produces the signal rather than reading a stale one.
+      var inputs = document.querySelectorAll('#sheet-url, select.select');
+      inputs.forEach(function (el) {
+        el.addEventListener('change', function () {
+          statusEl.textContent = '';
+          statusEl.classList.remove('is-saved');
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

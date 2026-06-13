@@ -493,9 +493,9 @@ final class CuaDriverClient {
     /// Run `cua-driver call <tool> '<compact-json>'` with the JSON encoded as a
     /// SINGLE positional argument, returning the raw stdout bytes for decoding.
     /// Throws `CuaDriverError.callFailed` (surfacing stderr) on a non-zero exit.
-    private func call(tool: String, json: [String: Any]) async throws -> Data {
+    private func call(tool: String, json: [String: Any], timeout: TimeInterval = 30) async throws -> Data {
         let jsonArgument = try Self.compactJSONString(from: json)
-        let result = try await runProcess(arguments: ["call", tool, jsonArgument])
+        let result = try await runProcess(arguments: ["call", tool, jsonArgument], timeout: timeout)
 
         guard result.exitCode == 0 else {
             // Driver reports failures on stderr with a non-zero exit. Fall back to
@@ -675,5 +675,322 @@ private struct GetWindowStateResponse: Codable {
         case treeMarkdown = "tree_markdown"
         case elementCount = "element_count"
         case screenshotFilePath = "screenshot_file_path"
+    }
+}
+
+// MARK: - Feature 2a: Browser/DOM grounding via the cua `page` tool
+//
+// The `page` tool drives the browser page loaded in a running app. On
+// Chrome/macOS this goes through AppleScript, which has TWO hard prerequisites
+// that the core AX demo path does NOT need:
+//   1. Chrome's "Allow JavaScript from Apple Events" pref must be on, and
+//   2. an Automation TCC grant must let cua-driver send events to Chrome.
+// When either is missing, every page action fails. These wrappers DETECT that
+// shape of failure in stderr and rethrow it as `CuaPageError.unavailable`, the
+// loop's signal to silently fall back to the verified AX `element_index` path.
+//
+// GOLDEN RULE: every call here is a bonus that degrades to AX. Callers MUST be
+// prepared to catch (try?/do-catch) and continue — a page error never ends a run.
+//
+// JSON key mapping for `cua-driver call page '<json>'` (verified against the
+// page tool's input_schema): action, pid, window_id, css_selector (query_dom),
+// selector (click_element), attributes ([String] for query_dom).
+
+/// One element returned by the `page` tool's `query_dom` action.
+///
+/// Shape is best-effort: the driver renders matching DOM nodes and (when
+/// `attributes` were requested) their attribute map. All fields are optional so
+/// a partial / differently-shaped row never fails the whole decode — a missing
+/// field simply decodes to nil rather than throwing, which keeps DOM enrichment
+/// resilient (the loop can still fall back to AX).
+struct CuaPageElement: Codable {
+    /// CSS-addressable selector for the node (e.g. "#sheet-url"), when present.
+    let selector: String?
+    /// Lowercased tag name (e.g. "input", "select", "button", "a"), when present.
+    let tag: String?
+    /// Visible/text content of the node, when present.
+    let text: String?
+    /// Requested attributes (id/name/aria-label/…) keyed by attribute name.
+    let attributes: [String: String]?
+
+    enum CodingKeys: String, CodingKey {
+        case selector
+        case tag
+        case text
+        case attributes
+    }
+
+    init(selector: String?, tag: String?, text: String?, attributes: [String: String]?) {
+        self.selector = selector
+        self.tag = tag
+        self.text = text
+        self.attributes = attributes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.selector = try? container.decodeIfPresent(String.self, forKey: .selector)
+        self.tag = try? container.decodeIfPresent(String.self, forKey: .tag)
+        self.text = try? container.decodeIfPresent(String.self, forKey: .text)
+        // Attribute values arrive as strings; tolerate absence or a non-string map.
+        self.attributes = try? container.decodeIfPresent([String: String].self, forKey: .attributes)
+    }
+}
+
+/// Raised when the `page` tool is unusable in this environment — specifically
+/// when Chrome's "Allow JavaScript from Apple Events" is off or the Automation
+/// TCC grant is missing. Callers treat this as "no browser grounding available"
+/// and fall back to the AX `element_index` path. The associated string carries
+/// the driver's stderr for logging.
+enum CuaPageError: Error, CustomStringConvertible {
+    case unavailable(String)
+
+    var description: String {
+        switch self {
+        case .unavailable(let detail):
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "cua page tool unavailable (Apple Events / Automation / JS-from-Apple-Events not enabled): \(trimmed.isEmpty ? "(no detail)" : trimmed)"
+        }
+    }
+
+    var localizedDescription: String { description }
+}
+
+extension CuaDriverClient {
+
+    /// `page` action `get_text` — extract the page's visible text for the target
+    /// app window. Used by `browserGroundingProbe` as the cheapest availability
+    /// check, and as a coarse text read.
+    ///
+    /// Throws `CuaPageError.unavailable` when the driver reports an Apple Events /
+    /// Automation / JS-from-Apple-Events failure (caller falls back to AX); any
+    /// other error is rethrown as the underlying `CuaDriverError`.
+    func pageGetText(pid: Int, windowId: Int?) async throws -> String {
+        var arguments: [String: Any] = [
+            "action": "get_text",
+            "pid": pid
+        ]
+        if let windowId {
+            arguments["window_id"] = windowId
+        }
+
+        let data = try await callPage(arguments: arguments)
+
+        // The driver returns the extracted text under a few plausible keys
+        // depending on version; accept any, else fall back to the raw payload.
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["text", "result", "value", "output"] {
+                if let string = object[key] as? String { return string }
+            }
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// `page` action `query_dom` — find elements matching `cssSelector`, including
+    /// the requested `attributes` in each result. Maps to the page tool's
+    /// `css_selector` + `attributes` keys.
+    ///
+    /// Returns `[CuaPageElement]` (best-effort decode; a non-array payload yields
+    /// an empty array rather than throwing). Throws `CuaPageError.unavailable`
+    /// when the page tool is not usable so the caller falls back to AX.
+    func pageQueryDom(
+        pid: Int,
+        windowId: Int?,
+        cssSelector: String,
+        attributes: [String]
+    ) async throws -> [CuaPageElement] {
+        var arguments: [String: Any] = [
+            "action": "query_dom",
+            "pid": pid,
+            "css_selector": cssSelector
+        ]
+        if let windowId {
+            arguments["window_id"] = windowId
+        }
+        if !attributes.isEmpty {
+            arguments["attributes"] = attributes
+        }
+
+        let data = try await callPage(arguments: arguments)
+        return Self.decodePageElements(from: data)
+    }
+
+    /// `page` action `click_element` — click the element matched by `selector`,
+    /// animating the agent cursor to its on-screen center first (visible feedback).
+    /// Maps to the page tool's `selector` key.
+    ///
+    /// Throws `CuaPageError.unavailable` when the page tool is not usable so the
+    /// caller can re-observe and fall back to an AX `element_index` click.
+    func pageClickElement(pid: Int, windowId: Int?, selector: String) async throws {
+        var arguments: [String: Any] = [
+            "action": "click_element",
+            "pid": pid,
+            "selector": selector
+        ]
+        if let windowId {
+            arguments["window_id"] = windowId
+        }
+        _ = try await callPage(arguments: arguments)
+    }
+
+    /// One cheap `page.get_text` to decide whether browser grounding is usable in
+    /// this environment, cached per (pid, window_id) so the loop probes ONCE per
+    /// run. Returns `true` only when the page tool answered without an Apple
+    /// Events / Automation / JS failure; any failure (including a transient
+    /// `CuaDriverError`) returns `false` so the loop runs AX-only. Never throws.
+    func browserGroundingProbe(pid: Int, windowId: Int?) async -> Bool {
+        let cacheKey = Self.groundingCacheKey(pid: pid, windowId: windowId)
+        if let cached = Self.browserGroundingCache[cacheKey] {
+            return cached
+        }
+        let available: Bool
+        do {
+            _ = try await pageGetText(pid: pid, windowId: windowId)
+            available = true
+        } catch {
+            // CuaPageError.unavailable OR any other failure → grounding is off.
+            available = false
+        }
+        Self.browserGroundingCache[cacheKey] = available
+        return available
+    }
+
+    // MARK: page tool internals
+
+    /// Invoke `cua-driver call page '<json>'`, translating the page tool's
+    /// "browser not reachable" failures into `CuaPageError.unavailable` so callers
+    /// fall back to AX. The base `call(tool:json:)` already classifies some
+    /// stderr as `CuaDriverError.permissionDenied` (it matches "permission" /
+    /// "not authorized" / "accessibility") and the rest as `.callFailed`; we
+    /// inspect BOTH for the page-specific signatures below and rethrow as
+    /// `.unavailable`. Anything we can't attribute to the browser pathway is
+    /// rethrown unchanged.
+    private func callPage(arguments: [String: Any]) async throws -> Data {
+        do {
+            // Page calls go through AppleScript and can hang if the browser is
+            // wedged; cap them well under the 30s AX default so the loop falls
+            // back to the verified AX path fast (esp. the run-start probe).
+            return try await call(tool: "page", json: arguments, timeout: 8)
+        } catch let error as CuaDriverError {
+            switch error {
+            case .callFailed(_, let stderr):
+                if Self.isPageUnavailable(stderr) {
+                    throw CuaPageError.unavailable(stderr)
+                }
+                throw error
+            case .permissionDenied(let detail):
+                // An Automation TCC denial is reported as a permission failure;
+                // for the page tool that means "use AX instead", not a hard stop.
+                if Self.isPageUnavailable(detail) {
+                    throw CuaPageError.unavailable(detail)
+                }
+                throw error
+            case .binaryNotFound, .decodeFailed:
+                throw error
+            }
+        }
+    }
+
+    /// Detect the page tool's "browser not reachable / scripting not enabled"
+    /// failure shapes in driver stderr. Matching is case-insensitive substring so
+    /// it survives minor wording changes across driver versions.
+    private static func isPageUnavailable(_ stderr: String) -> Bool {
+        let lowered = stderr.lowercased()
+        let signatures = [
+            "apple event",          // "Apple Events", "Apple Event"
+            "appleevent",
+            "not authorized",       // Automation TCC denial
+            "automation",           // "Automation" permission wording
+            "not allowed to send",  // AppleScript -1743 phrasing
+            "-1743",                // errAEEventNotPermitted
+            "javascript",           // "Allow JavaScript from Apple Events" off
+            "execute javascript",
+            "apple events is not enabled",
+            "scripting is not enabled",
+            "allow javascript"
+        ]
+        return signatures.contains { lowered.contains($0) }
+    }
+
+    /// Best-effort decode of a `query_dom` response into `[CuaPageElement]`.
+    /// Accepts several plausible payload shapes (a bare array, or an object with
+    /// an `elements` / `results` / `matches` array) so DOM enrichment is robust
+    /// across driver versions. A shape we don't recognize yields `[]` — never a
+    /// throw — keeping the caller on a clean AX fallback.
+    private static func decodePageElements(from data: Data) -> [CuaPageElement] {
+        let decoder = JSONDecoder()
+
+        // 1) Bare array of elements.
+        if let elements = try? decoder.decode([CuaPageElement].self, from: data) {
+            return elements
+        }
+
+        // 2) Object wrapping an array under a known key.
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+        for key in ["elements", "results", "matches", "nodes", "result"] {
+            guard let nested = object[key] else { continue }
+            if let nestedData = try? JSONSerialization.data(withJSONObject: nested),
+               let elements = try? decoder.decode([CuaPageElement].self, from: nestedData) {
+                return elements
+            }
+        }
+        return []
+    }
+
+    // MARK: grounding probe cache
+
+    /// Probe results keyed by "pid:windowId" (windowId omitted → "pid:any").
+    /// `@MainActor` (the whole client is) makes this static mutable state safe.
+    private static var browserGroundingCache: [String: Bool] = [:]
+
+    private static func groundingCacheKey(pid: Int, windowId: Int?) -> String {
+        if let windowId { return "\(pid):\(windowId)" }
+        return "\(pid):any"
+    }
+}
+
+// MARK: - Feature 3b: Optional cua trajectory recording (best-effort wrappers)
+//
+// These wrap the driver's `start_recording` / `stop_recording` tools so the
+// agent loop can OPTIONALLY capture a cua trajectory (per-turn app_state /
+// screenshot / action.json / click.png folders) alongside its own steps.jsonl.
+//
+// BEST-EFFORT semantics — callers invoke these with `try?` and IGNORE failures:
+//   - `try? await startRecording(outputDir: runDir/"cua-trajectory", recordVideo: false)` at run start.
+//   - `try? await stopRecording()` on EVERY terminal path (done / stop / limit / error).
+// If recording is unavailable (older driver, missing grant, daemon down) the
+// call throws and the caller's `try?` swallows it — the run continues identically
+// to v0.2.0. Recording NEVER gates or ends a run; video stays OFF by default.
+//
+// JSON key mapping (verified against start_recording input_schema):
+//   output_dir (String, required), record_video (Bool, default false).
+
+extension CuaDriverClient {
+
+    /// `start_recording` — begin trajectory recording into `outputDir`. Every
+    /// subsequent action-tool call (click/type_text/set_value/scroll/press_key/
+    /// hotkey/…) writes a `turn-NNNNN/` folder there. Video is OFF unless
+    /// `recordVideo` is true (macOS uses ScreenCaptureKit, needs macOS 15+).
+    ///
+    /// BEST-EFFORT: call with `try?`. Throwing here must never end a run — the
+    /// loop falls back to its own `steps.jsonl` trace and continues unchanged.
+    func startRecording(outputDir: String, recordVideo: Bool) async throws {
+        let arguments: [String: Any] = [
+            "output_dir": outputDir,
+            "record_video": recordVideo
+        ]
+        _ = try await call(tool: "start_recording", json: arguments)
+    }
+
+    /// `stop_recording` — disable per-turn capture and finalize any mp4. The
+    /// driver documents this as UNCONDITIONAL (stops whatever recording is active)
+    /// and a no-op when nothing is recording, so it is safe to call on every
+    /// terminal path even if `startRecording` was never reached or failed.
+    ///
+    /// BEST-EFFORT: call with `try?`. A failure here is non-fatal.
+    func stopRecording() async throws {
+        _ = try await call(tool: "stop_recording", json: [:])
     }
 }

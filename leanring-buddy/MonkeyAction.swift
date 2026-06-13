@@ -23,6 +23,7 @@ struct MonkeyAction: Codable {
     var elementIndex: Int? = nil         // JSON key: element_index
     var x: Double? = nil
     var y: Double? = nil
+    var cssSelector: String? = nil       // JSON key: css_selector (web/DOM click target)
     // payloads
     var text: String? = nil              // type_text
     var value: String? = nil             // set_value
@@ -38,6 +39,7 @@ struct MonkeyAction: Codable {
     enum CodingKeys: String, CodingKey {
         case action, reason, x, y, text, value, key, keys, direction, by, amount, seconds, summary, question
         case elementIndex = "element_index"
+        case cssSelector = "css_selector"
     }
 }
 
@@ -55,7 +57,7 @@ enum MonkeyActionValidationError: Error, CustomStringConvertible {
         case let .missingField(action, field):
             return "Action '\(action.rawValue)' is missing required field '\(field)'."
         case let .noTarget(action):
-            return "Action '\(action.rawValue)' needs a target: provide 'element_index' or both 'x' and 'y'."
+            return "Action '\(action.rawValue)' needs a target: provide 'element_index', both 'x' and 'y', or 'css_selector'."
         }
     }
 }
@@ -96,10 +98,15 @@ extension MonkeyAction {
             break
 
         case .click:
-            // Requires element_index OR (x AND y).
+            // Requires element_index OR (x AND y) OR css_selector.
+            // css_selector is the additive web/DOM target; it is only acted on
+            // when browser grounding is active (the loop falls back to AX
+            // element_index otherwise), but it satisfies validation here so the
+            // model may emit it without the action being rejected.
             let hasElementTarget = elementIndex != nil
             let hasCoordinateTarget = (x != nil && y != nil)
-            guard hasElementTarget || hasCoordinateTarget else {
+            let hasCssSelectorTarget = (cssSelector?.isEmpty == false)
+            guard hasElementTarget || hasCoordinateTarget || hasCssSelectorTarget else {
                 throw MonkeyActionValidationError.noTarget(action: action)
             }
 
