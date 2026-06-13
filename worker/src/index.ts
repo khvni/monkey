@@ -20,6 +20,19 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // CORS preflight — lets the in-browser Monkeybot demo agent call /chat from a
+    // file:// (Origin: null) or any page. Open by design for the demo; scope the
+    // origin before shipping anything public.
+    const corsHeaders: Record<string, string> = {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "POST, OPTIONS",
+      "access-control-allow-headers": "content-type, anthropic-version, x-api-key",
+      "access-control-max-age": "86400",
+    };
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
+
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405 });
     }
@@ -75,6 +88,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
     headers: {
       "content-type": response.headers.get("content-type") || "text/event-stream",
       "cache-control": "no-cache",
+      "access-control-allow-origin": "*",
     },
   });
 }

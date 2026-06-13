@@ -3,542 +3,636 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ops Console — Incident Management</title>
+<title>Deals — HubSpot CRM</title>
 <style>
+  /* ---------- HubSpot-style light theme, 8px spacing system ---------- */
   :root{
-    --bg:#0a0c10;
-    --bg-elev:#0e1116;
-    --surface:#13171e;
-    --surface-2:#171c25;
-    --surface-3:#1d232e;
-    --border:#222a36;
-    --border-strong:#2c3644;
-    --text:#eef1f6;
-    --text-2:#aab2c0;
-    --muted:#6b7585;
-    --muted-2:#525c6b;
-    --accent:#6e8bff;
-    --accent-hover:#5a79f5;
-    --accent-press:#4a68e6;
-    --accent-soft:rgba(110,139,255,.14);
-    --accent-ring:rgba(110,139,255,.32);
-    --sev1:#ff6b6b;
-    --sev2:#fbbf45;
-    --sev3:#34d399;
-    --ok:#34d399;
-    --shadow-sm:0 1px 2px rgba(0,0,0,.4);
-    --shadow-md:0 8px 24px -6px rgba(0,0,0,.5);
-    --shadow-lg:0 24px 60px -12px rgba(0,0,0,.65);
-    --r-sm:6px; --r-md:9px; --r-lg:13px;
-    --ease:cubic-bezier(.2,.7,.2,1);
+    --hs-orange:#ff7a59;
+    --hs-orange-hover:#ff8f73;
+    --hs-orange-press:#e8674a;
+    --hs-navy:#33475b;            /* HubSpot primary text / nav */
+    --hs-navy-2:#516f90;          /* secondary text */
+    --hs-muted:#7c98b6;           /* tertiary / placeholder */
+    --hs-link:#0091ae;            /* HubSpot teal link */
+    --bg:#f5f8fa;                 /* app canvas */
+    --surface:#ffffff;
+    --surface-2:#f5f8fa;
+    --border:#cbd6e2;             /* HubSpot field border */
+    --border-soft:#e1e4e8;        /* hairline dividers */
+    --border-strong:#b0c1d4;
+    --text:#33475b;
+    --text-2:#516f90;
+    --muted:#7c98b6;
+    --green:#00a4bd;
+    --row-hover:#f5f8fa;
+    --focus-ring:rgba(0,145,174,.28);
+    --shadow-sm:0 1px 2px rgba(45,62,80,.10);
+    --shadow-md:0 6px 18px -6px rgba(45,62,80,.22);
+    --shadow-lg:0 12px 34px -10px rgba(45,62,80,.30);
+    --r-sm:3px; --r-md:4px; --r-lg:6px;
+    --sp:8px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
   body{
-    background:
-      radial-gradient(1200px 600px at 85% -10%, rgba(110,139,255,.06), transparent 60%),
-      var(--bg);
+    background:var(--bg);
     color:var(--text);
-    font:14px/1.55 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
+    font:14px/1.5 "Lexend Deca",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;
-    text-rendering:optimizeLegibility;
   }
-  ::selection{background:var(--accent-soft);color:#fff}
+  ::selection{background:rgba(255,122,89,.20)}
 
-  .app{display:flex;height:100vh;width:1180px;max-width:100%;margin:0 auto;
-    border-left:1px solid var(--border);border-right:1px solid var(--border);
-    background:var(--bg-elev)}
+  .app{display:flex;height:100vh}
 
-  /* ---------- sidebar ---------- */
-  .sidebar{width:248px;flex-shrink:0;display:flex;flex-direction:column;
-    background:linear-gradient(180deg,var(--surface),var(--bg-elev));
-    border-right:1px solid var(--border);padding:18px 14px}
-  .brand{display:flex;align-items:center;gap:11px;padding:6px 8px 22px}
-  .brand .logo{width:30px;height:30px;border-radius:8px;flex-shrink:0;
-    background:linear-gradient(145deg,var(--accent),#8a6bff);
-    display:flex;align-items:center;justify-content:center;
-    box-shadow:0 4px 14px -3px rgba(110,139,255,.5), inset 0 1px 0 rgba(255,255,255,.25)}
-  .brand .logo svg{width:17px;height:17px;display:block}
-  .brand .name{font-weight:650;font-size:15px;letter-spacing:-.2px;line-height:1.1}
-  .brand .org{font-size:11.5px;color:var(--muted);letter-spacing:.1px;margin-top:1px}
+  /* ---------- left nav (HubSpot dark navy rail) ---------- */
+  .sidebar{width:200px;flex-shrink:0;display:flex;flex-direction:column;
+    background:#2d3e50;border-right:1px solid #243140}
+  .brand{display:flex;align-items:center;gap:8px;height:56px;padding:0 16px;
+    border-bottom:1px solid rgba(255,255,255,.08)}
+  .brand .sprocket{width:26px;height:26px;flex-shrink:0;color:var(--hs-orange)}
+  .brand .sprocket svg{width:26px;height:26px;display:block}
+  .brand .wordmark{font-weight:600;font-size:15px;color:#fff;letter-spacing:-.2px}
 
-  .nav-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;
-    color:var(--muted-2);padding:8px 12px 6px;font-weight:600}
-  .nav{display:flex;flex-direction:column;gap:2px}
-  .nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
-    background:none;border:none;color:var(--text-2);
-    padding:9px 12px;border-radius:var(--r-md);font-size:13.5px;font-weight:500;
-    cursor:pointer;position:relative;transition:background .14s var(--ease),color .14s var(--ease)}
-  .nav button svg{width:17px;height:17px;flex-shrink:0;stroke:currentColor;
-    stroke-width:1.7;fill:none;opacity:.85;transition:opacity .14s}
-  .nav button:hover{background:var(--surface-2);color:var(--text)}
-  .nav button:focus-visible{outline:2px solid var(--accent-ring);outline-offset:1px}
-  .nav button.active{background:var(--surface-3);color:var(--text);font-weight:600}
-  .nav button.active svg{opacity:1}
-  .nav button.active::before{content:"";position:absolute;left:-14px;top:8px;bottom:8px;
-    width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
-  .nav .badge{margin-left:auto;background:var(--surface-3);color:var(--muted);
+  .nav-label{font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+    color:#8aa0b6;padding:16px 18px 6px;font-weight:600}
+  .nav{display:flex;flex-direction:column}
+  .nav button{display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+    background:none;border:none;color:#c7d3e0;
+    padding:9px 18px;font-size:13.5px;font-weight:500;font-family:inherit;
+    cursor:pointer;position:relative;transition:background .12s,color .12s;border-left:3px solid transparent}
+  .nav button svg{width:17px;height:17px;flex-shrink:0;stroke:currentColor;stroke-width:1.8;fill:none}
+  .nav button:hover{background:rgba(255,255,255,.06);color:#fff}
+  .nav button:focus-visible{outline:2px solid var(--hs-orange);outline-offset:-2px}
+  .nav button.active{background:rgba(255,122,89,.12);color:#fff;font-weight:600;border-left-color:var(--hs-orange)}
+  .nav .count{margin-left:auto;background:rgba(255,255,255,.12);color:#dfe7ef;
     font-size:11px;font-weight:600;min-width:20px;text-align:center;
-    padding:1px 6px;border-radius:20px;border:1px solid var(--border)}
-  .nav button.active .badge{background:var(--accent-soft);color:#c3cdff;border-color:transparent}
+    padding:1px 6px;border-radius:10px}
+  .nav button.active .count{background:var(--hs-orange);color:#fff}
 
-  .sidebar-foot{margin-top:auto;padding:12px 8px 4px;border-top:1px solid var(--border)}
-  .userchip{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:var(--r-md);
-    cursor:pointer;transition:background .14s var(--ease)}
-  .userchip:hover{background:var(--surface-2)}
-  .avatar{width:30px;height:30px;border-radius:50%;flex-shrink:0;font-size:12px;font-weight:650;
-    color:#fff;display:flex;align-items:center;justify-content:center;
-    background:linear-gradient(145deg,#2dd4bf,#0ea5e9);box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
-  .userchip .meta{min-width:0}
-  .userchip .uname{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .userchip .urole{font-size:11px;color:var(--muted)}
-  .userchip .more{margin-left:auto;color:var(--muted-2)}
+  .nav-divider{height:1px;background:rgba(255,255,255,.08);margin:14px 18px}
 
-  /* ---------- main ---------- */
-  .main{flex:1;overflow-y:auto;position:relative;scroll-behavior:smooth}
-  .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:14px;
-    padding:0 34px;height:58px;
-    background:rgba(14,17,22,.78);backdrop-filter:saturate(160%) blur(14px);
-    -webkit-backdrop-filter:saturate(160%) blur(14px);
-    border-bottom:1px solid var(--border)}
-  .crumbs{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
-  .crumbs .sep{color:var(--muted-2)}
+  /* ---------- top bar ---------- */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{flex-shrink:0;display:flex;align-items:center;gap:16px;
+    height:56px;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--border-soft)}
+  .search{position:relative;flex:1;max-width:420px}
+  .search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);
+    width:15px;height:15px;stroke:var(--hs-muted);stroke-width:2;fill:none;pointer-events:none}
+  .search input{width:100%;height:34px;background:var(--surface-2);
+    border:1px solid var(--border-soft);border-radius:var(--r-sm);
+    color:var(--text);font:13.5px/1 inherit;padding:0 12px 0 34px;outline:none;
+    transition:border-color .12s,box-shadow .12s,background .12s}
+  .search input::placeholder{color:var(--hs-muted)}
+  .search input:focus{border-color:var(--green);background:#fff;box-shadow:0 0 0 2px var(--focus-ring)}
+  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .icon-btn{width:34px;height:34px;border-radius:var(--r-sm);background:transparent;
+    border:1px solid transparent;color:var(--hs-navy-2);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:background .12s,color .12s}
+  .icon-btn:hover{background:var(--surface-2);color:var(--hs-navy)}
+  .icon-btn svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.8;fill:none}
+  .top-avatar{width:32px;height:32px;border-radius:50%;font-size:12px;font-weight:600;color:#fff;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;
+    background:#516f90;transition:opacity .12s}
+  .top-avatar:hover{opacity:.88}
+
+  /* ---------- page subhead / breadcrumb ---------- */
+  .pagehead{flex-shrink:0;display:flex;align-items:center;gap:8px;
+    padding:14px 24px 13px;background:var(--surface);border-bottom:1px solid var(--border-soft)}
+  .crumbs{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--hs-navy-2)}
+  .crumbs a{color:var(--hs-link);text-decoration:none}
+  .crumbs a:hover{text-decoration:underline}
+  .crumbs .sep{color:var(--hs-muted)}
   .crumbs .cur{color:var(--text);font-weight:600}
-  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:10px}
-  .pill-live{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);
-    background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:5px 11px;font-weight:500}
-  .pill-live .live-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);
-    box-shadow:0 0 0 0 rgba(52,211,153,.6);animation:pulse 2.2s var(--ease) infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.55)}70%{box-shadow:0 0 0 7px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
-  .icon-btn{width:34px;height:34px;border-radius:var(--r-md);background:var(--surface);
-    border:1px solid var(--border);color:var(--text-2);display:flex;align-items:center;justify-content:center;
-    cursor:pointer;transition:background .14s,color .14s,border-color .14s}
-  .icon-btn:hover{background:var(--surface-2);color:var(--text);border-color:var(--border-strong)}
-  .icon-btn svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.7;fill:none}
-  .top-avatar{width:32px;height:32px;border-radius:50%;font-size:12px;font-weight:650;color:#fff;
-    display:flex;align-items:center;justify-content:center;cursor:pointer;
-    background:linear-gradient(145deg,#2dd4bf,#0ea5e9);box-shadow:inset 0 1px 0 rgba(255,255,255,.3);
-    transition:transform .14s var(--ease)}
-  .top-avatar:hover{transform:scale(1.05)}
 
-  .content{padding:30px 34px 0}
-  h1{font-size:21px;font-weight:650;letter-spacing:-.4px;margin-bottom:5px}
-  .sub{color:var(--text-2);font-size:13.5px;margin-bottom:28px;max-width:620px}
-  .sub b{color:var(--text);font-weight:600}
+  /* ---------- scroll container ---------- */
+  #main{flex:1;overflow-y:auto;background:var(--bg);scroll-behavior:smooth}
+  .content{max-width:760px;padding:24px}
   .view{display:none}
-  .view.active{display:block;animation:fade .22s var(--ease)}
-  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .view.active{display:block}
 
-  /* card wrapper for the form */
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
-    box-shadow:var(--shadow-sm);max-width:640px}
-  .card-head{padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
-  .card-head .ctitle{font-size:13.5px;font-weight:600}
-  .card-head .ctag{margin-left:auto;font-size:11px;color:var(--muted);background:var(--surface-3);
-    border:1px solid var(--border);padding:2px 9px;border-radius:20px;font-weight:500}
-  .card-body{padding:22px}
+  /* ---------- record card ---------- */
+  .card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r-lg);
+    box-shadow:var(--shadow-sm)}
+  .card-head{padding:16px 24px;border-bottom:1px solid var(--border-soft)}
+  .card-head .ctitle{font-size:16px;font-weight:600;color:var(--text);letter-spacing:-.2px}
+  .card-head .csub{font-size:13px;color:var(--hs-navy-2);margin-top:2px}
+  .card-body{padding:24px}
 
+  /* ---------- form rows ---------- */
   .field{margin-bottom:20px}
   .field:last-child{margin-bottom:0}
-  label{display:block;font-size:12.5px;font-weight:550;letter-spacing:-.1px;color:var(--text);margin-bottom:7px}
-  label .req{color:var(--sev1);margin-left:2px}
-  label code{font-family:ui-monospace,"SF Mono",monospace;font-size:11.5px;color:var(--accent);
-    background:var(--accent-soft);padding:1px 6px;border-radius:5px;font-weight:600}
-  input[type=text],textarea,select{width:100%;background:var(--bg-elev);
-    border:1px solid var(--border-strong);color:var(--text);
-    border-radius:var(--r-md);padding:11px 13px;font-size:14px;font-family:inherit;
-    transition:border-color .14s var(--ease),box-shadow .14s var(--ease),background .14s}
-  input::placeholder,textarea::placeholder{color:var(--muted-2)}
-  input[type=text]:hover,textarea:hover,select:hover{border-color:#36414f}
-  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);
-    box-shadow:0 0 0 3.5px var(--accent-ring);background:var(--surface)}
-  textarea{min-height:96px;resize:vertical;line-height:1.55}
-  select{appearance:none;
-    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236b7585' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-    background-repeat:no-repeat;background-position:right 13px center;padding-right:38px;cursor:pointer}
-  .hint{font-size:12px;color:var(--muted);margin-top:7px;line-height:1.5}
-  .hint code{font-family:ui-monospace,"SF Mono",monospace;color:var(--text-2);
-    background:var(--surface-3);padding:1px 5px;border-radius:4px;font-size:11px}
-  .hint kbd{font-family:inherit;font-size:11px;color:var(--text-2);background:var(--surface-3);
-    border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-weight:600}
-  .row{display:flex;gap:18px}.row .field{flex:1;margin-bottom:20px}
+  label{display:block;font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+  label .req{color:#cc3333;margin-left:1px}
+  label .opt-tag{font-weight:400;color:var(--hs-muted);font-size:12px;margin-left:6px}
+  label code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11.5px;color:var(--hs-orange-press);
+    background:rgba(255,122,89,.12);padding:1px 6px;border-radius:3px;font-weight:600}
 
-  .check{display:flex;align-items:flex-start;gap:11px;padding:13px 14px;margin-bottom:22px;
-    background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:var(--r-md);
-    cursor:pointer;transition:border-color .14s,background .14s}
-  .check:hover{border-color:#36414f;background:var(--surface)}
-  .check input{width:17px;height:17px;margin-top:1px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+  .control{position:relative}
+  input[type=text],textarea,select{width:100%;background:var(--surface);
+    border:1px solid var(--border);color:var(--text);
+    border-radius:var(--r-sm);padding:9px 11px;font-size:14px;font-family:inherit;line-height:1.4;
+    transition:border-color .12s,box-shadow .12s}
+  input::placeholder,textarea::placeholder{color:var(--hs-muted)}
+  input[type=text]:hover,textarea:hover,select:hover{border-color:var(--border-strong)}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--green);
+    box-shadow:0 0 0 2px var(--focus-ring)}
+  textarea{min-height:88px;resize:vertical;line-height:1.5}
+  select{appearance:none;cursor:pointer;padding-right:34px;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237c98b6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat:no-repeat;background-position:right 12px center}
+
+  /* amount field with $ prefix */
+  .control.has-prefix .prefix{position:absolute;left:11px;top:50%;transform:translateY(-50%);
+    color:var(--hs-navy-2);font-size:14px;pointer-events:none}
+  .control.has-prefix input{padding-left:24px}
+
+  .hint{font-size:12px;color:var(--hs-navy-2);margin-top:6px;line-height:1.45}
+  .hint kbd{font-family:inherit;font-size:11px;color:var(--text);background:var(--surface-2);
+    border:1px solid var(--border);border-bottom-width:2px;border-radius:3px;padding:0 5px;font-weight:600}
+  .hint code{font-family:ui-monospace,"SF Mono",Menlo,monospace;color:var(--hs-orange-press);
+    background:rgba(255,122,89,.10);padding:0 5px;border-radius:3px;font-size:11.5px}
+
+  /* checkbox row */
+  .check{display:flex;align-items:flex-start;gap:10px;padding:0;margin-top:4px}
+  .check input{width:16px;height:16px;margin-top:2px;accent-color:var(--hs-orange);cursor:pointer;flex-shrink:0}
   .check label{margin:0;font-size:13.5px;font-weight:500;color:var(--text);cursor:pointer}
-  .check label .sublabel{display:block;font-weight:400;font-size:12px;color:var(--muted);margin-top:2px}
+  .check label .sublabel{display:block;font-weight:400;font-size:12px;color:var(--hs-navy-2);margin-top:2px}
 
-  .actions{display:flex;align-items:center;gap:12px;padding-top:4px}
-  button.primary{display:inline-flex;align-items:center;gap:8px;
-    background:linear-gradient(180deg,var(--accent),var(--accent-hover));color:#fff;border:none;
-    border-radius:var(--r-md);padding:11px 20px;font-size:13.5px;font-weight:600;cursor:pointer;
-    box-shadow:0 1px 0 rgba(255,255,255,.18) inset, 0 6px 18px -6px rgba(110,139,255,.6);
-    transition:transform .12s var(--ease),box-shadow .14s var(--ease),background .14s}
-  button.primary svg{width:15px;height:15px;stroke:currentColor;stroke-width:2;fill:none}
-  button.primary:hover{background:linear-gradient(180deg,var(--accent-hover),var(--accent-press));
-    box-shadow:0 1px 0 rgba(255,255,255,.2) inset, 0 8px 22px -6px rgba(110,139,255,.7);transform:translateY(-1px)}
-  button.primary:active{transform:translateY(0)}
-  button.primary:focus-visible{outline:2px solid #fff;outline-offset:2px}
-  .actions .meta-note{font-size:12px;color:var(--muted)}
+  /* ---------- sticky toolbar ---------- */
+  .toolbar{position:sticky;bottom:0;z-index:20;display:flex;align-items:center;gap:12px;
+    margin:0 -24px -24px;padding:14px 24px;background:var(--surface);
+    border-top:1px solid var(--border-soft);border-radius:0 0 var(--r-lg) var(--r-lg)}
+  button.primary{background:var(--hs-orange);color:#fff;border:1px solid var(--hs-orange);
+    border-radius:var(--r-sm);padding:9px 18px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;
+    transition:background .12s,border-color .12s}
+  button.primary:hover{background:var(--hs-orange-hover);border-color:var(--hs-orange-hover)}
+  button.primary:active{background:var(--hs-orange-press);border-color:var(--hs-orange-press)}
+  button.primary:focus-visible{outline:2px solid var(--hs-orange-press);outline-offset:2px}
+  button.ghost{background:transparent;color:var(--hs-link);border:1px solid var(--border);
+    border-radius:var(--r-sm);padding:9px 16px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;
+    transition:background .12s,border-color .12s}
+  button.ghost:hover{background:var(--surface-2);border-color:var(--border-strong)}
+  .toolbar .spacer-flex{margin-left:auto;font-size:12px;color:var(--hs-muted)}
 
-  /* ---------- slash menu ---------- */
+  /* ---------- slash menu (stage field) ---------- */
   .slashwrap{position:relative}
-  .slashmenu{position:absolute;top:calc(100% + 8px);left:0;right:0;
-    background:var(--surface-2);border:1px solid var(--border-strong);border-radius:var(--r-lg);
-    box-shadow:var(--shadow-lg);overflow:hidden;display:none;z-index:40;padding:6px}
-  .slashmenu.open{display:block;animation:menupop .15s var(--ease)}
-  @keyframes menupop{from{opacity:0;transform:translateY(-6px) scale(.985)}to{opacity:1;transform:none}}
-  .slashmenu .menu-head{display:flex;align-items:center;gap:7px;padding:6px 9px 7px;
-    font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted-2);font-weight:600}
-  .slashmenu .opt{display:flex;align-items:center;gap:11px;padding:9px 11px;cursor:pointer;
-    font-size:13.5px;border-radius:var(--r-md);transition:background .1s var(--ease)}
-  .slashmenu .opt .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,255,255,.04)}
-  .slashmenu .opt .otxt{font-weight:550;color:var(--text)}
-  .slashmenu .opt .odesc{color:var(--muted);font-weight:400;margin-left:2px}
-  .slashmenu .opt .k{margin-left:auto;font-family:ui-monospace,"SF Mono",monospace;color:var(--muted-2);
-    font-size:11px;background:var(--bg-elev);border:1px solid var(--border);padding:1px 7px;border-radius:5px}
-  .slashmenu .opt.sel{background:var(--accent-soft)}
-  .slashmenu .opt.sel .k{color:var(--text-2);border-color:var(--border-strong)}
-  .slashmenu .opt:hover{background:var(--surface-3)}
-  .slashmenu .menu-foot{display:flex;align-items:center;gap:10px;padding:7px 9px 4px;margin-top:4px;
-    border-top:1px solid var(--border);font-size:11px;color:var(--muted-2)}
-  .slashmenu .menu-foot kbd{font-family:inherit;background:var(--bg-elev);border:1px solid var(--border);
-    border-radius:4px;padding:0 5px;color:var(--muted);font-weight:600}
+  .slashmenu{position:absolute;top:calc(100% + 4px);left:0;right:0;
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);
+    box-shadow:var(--shadow-lg);overflow:hidden;display:none;z-index:40;padding:4px}
+  .slashmenu.open{display:block}
+  .slashmenu .menu-head{padding:7px 10px 6px;
+    font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--hs-muted);font-weight:600}
+  .slashmenu .opt{display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;
+    font-size:13.5px;border-radius:var(--r-sm)}
+  .slashmenu .opt .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+  .slashmenu .opt .otxt{font-weight:500;color:var(--text)}
+  .slashmenu .opt .k{margin-left:auto;font-family:ui-monospace,"SF Mono",Menlo,monospace;color:var(--hs-muted);
+    font-size:11px;background:var(--surface-2);border:1px solid var(--border-soft);padding:1px 6px;border-radius:3px}
+  .slashmenu .opt.sel{background:rgba(0,145,174,.10)}
+  .slashmenu .opt:hover{background:var(--surface-2)}
+  .slashmenu .menu-foot{display:flex;align-items:center;gap:8px;padding:7px 10px 4px;margin-top:2px;
+    border-top:1px solid var(--border-soft);font-size:11px;color:var(--hs-muted)}
+  .slashmenu .menu-foot kbd{font-family:inherit;background:var(--surface-2);border:1px solid var(--border-soft);
+    border-radius:3px;padding:0 5px;color:var(--text-2);font-weight:600}
 
-  .badgepill{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:20px;
-    font-size:12px;font-weight:600;letter-spacing:-.1px}
+  .stage-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;
+    font-size:12.5px;font-weight:600}
 
   /* ---------- toast ---------- */
-  .toast{position:fixed;bottom:26px;left:50%;
-    transform:translateX(-50%) translateY(14px);
-    background:var(--surface-2);color:var(--text);border:1px solid var(--border-strong);
-    font-weight:550;font-size:13.5px;padding:12px 16px 12px 14px;border-radius:var(--r-lg);
-    box-shadow:var(--shadow-lg);opacity:0;transition:all .26s var(--ease);pointer-events:none;
-    display:flex;align-items:center;gap:11px;z-index:90}
-  .toast .tcheck{width:22px;height:22px;border-radius:50%;flex-shrink:0;
-    background:rgba(52,211,153,.16);color:var(--ok);display:flex;align-items:center;justify-content:center}
-  .toast .tcheck svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.6;fill:none}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(14px);
+    background:var(--hs-navy);color:#fff;border-radius:var(--r-md);
+    font-weight:500;font-size:14px;padding:12px 16px 12px 14px;
+    box-shadow:var(--shadow-lg);opacity:0;transition:opacity .22s,transform .22s;pointer-events:none;
+    display:flex;align-items:center;gap:10px;z-index:90}
+  .toast .tcheck{width:20px;height:20px;border-radius:50%;flex-shrink:0;
+    background:rgba(255,255,255,.18);color:#fff;display:flex;align-items:center;justify-content:center}
+  .toast .tcheck svg{width:12px;height:12px;stroke:currentColor;stroke-width:3;fill:none}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
-  /* ---------- table ---------- */
-  .table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
+  /* ---------- pipeline table ---------- */
+  h1{font-size:20px;font-weight:600;color:var(--text);letter-spacing:-.3px;margin-bottom:4px}
+  .sub{color:var(--hs-navy-2);font-size:13.5px;margin-bottom:18px}
+  .table-wrap{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r-lg);
     overflow:hidden;box-shadow:var(--shadow-sm)}
   table{width:100%;border-collapse:collapse}
-  thead tr{background:var(--bg-elev)}
-  th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
-  th{color:var(--muted);text-transform:uppercase;font-size:10.5px;letter-spacing:.7px;font-weight:600}
-  tbody tr{transition:background .12s var(--ease)}
-  tbody tr:hover{background:var(--surface-2)}
+  thead tr{background:var(--surface-2)}
+  th,td{text-align:left;padding:11px 16px;border-bottom:1px solid var(--border-soft);font-size:13.5px;vertical-align:middle}
+  th{color:var(--hs-navy-2);text-transform:uppercase;font-size:11px;letter-spacing:.5px;font-weight:600}
+  tbody tr{transition:background .1s}
+  tbody tr:hover{background:var(--row-hover)}
   tbody tr:last-child td{border-bottom:none}
-  td:first-child{color:var(--muted);font-variant-numeric:tabular-nums;font-weight:600}
-  .empty{color:var(--muted);padding:56px 0;text-align:center}
-  .empty .eicon{width:42px;height:42px;margin:0 auto 12px;border-radius:11px;
-    background:var(--surface-2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted-2)}
-  .empty .eicon svg{width:20px;height:20px;stroke:currentColor;stroke-width:1.6;fill:none}
-  .empty .etitle{color:var(--text-2);font-weight:550;font-size:13.5px;margin-bottom:3px}
+  td.deal-name{color:var(--hs-link);font-weight:600}
+  td.amount{font-variant-numeric:tabular-nums;font-weight:600;color:var(--text)}
+  .empty{color:var(--hs-navy-2);padding:52px 0;text-align:center}
+  .empty .eicon{width:40px;height:40px;margin:0 auto 12px;border-radius:8px;
+    background:var(--surface-2);border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;color:var(--hs-muted)}
+  .empty .eicon svg{width:20px;height:20px;stroke:currentColor;stroke-width:1.7;fill:none}
+  .empty .etitle{color:var(--text);font-weight:600;font-size:14px;margin-bottom:3px}
 
-  /* ---------- reports stats ---------- */
-  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;max-width:760px}
-  .stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
-    padding:18px 20px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;
-    transition:border-color .14s,transform .14s var(--ease)}
-  .stat:hover{border-color:var(--border-strong);transform:translateY(-1px)}
-  .stat .stat-head{display:flex;align-items:center;gap:9px;margin-bottom:14px}
-  .stat .sicon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center}
-  .stat .sicon svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.8;fill:none}
-  .stat.s-blue .sicon{background:var(--accent-soft);color:var(--accent)}
-  .stat.s-amber .sicon{background:rgba(251,191,69,.14);color:var(--sev2)}
-  .stat .l{color:var(--text-2);font-size:13px;font-weight:550}
-  .stat .n{font-size:30px;font-weight:700;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
-  .stat .delta{font-size:12px;color:var(--muted);margin-top:8px}
+  /* ---------- reports ---------- */
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+  .stat{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--r-lg);
+    padding:18px 20px;box-shadow:var(--shadow-sm)}
+  .stat .l{color:var(--hs-navy-2);font-size:13px;font-weight:600;margin-bottom:10px}
+  .stat .n{font-size:28px;font-weight:600;color:var(--text);letter-spacing:-.6px;line-height:1;font-variant-numeric:tabular-nums}
+  .stat .delta{font-size:12px;color:var(--hs-muted);margin-top:8px}
 
-  .spacer{height:160px}
+  .spacer{height:200px}
 
-  /* scrollbar */
-  .main::-webkit-scrollbar{width:11px}
-  .main::-webkit-scrollbar-thumb{background:var(--surface-3);border-radius:8px;border:3px solid var(--bg-elev)}
-  .main::-webkit-scrollbar-thumb:hover{background:var(--border-strong)}
+  #main::-webkit-scrollbar{width:12px}
+  #main::-webkit-scrollbar-thumb{background:#c4d0dd;border-radius:8px;border:3px solid var(--bg)}
+  #main::-webkit-scrollbar-thumb:hover{background:var(--border-strong)}
 </style>
 </head>
 <body>
 <div class="app">
+  <!-- ---------- LEFT NAV ---------- -->
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="M9 12l2 2 4-4"/>
-        </svg>
-      </div>
-      <div>
-        <div class="name">Ops Console</div>
-        <div class="org">Reliability Eng · Acme</div>
-      </div>
+      <span class="sprocket">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.7 9.6V7.4a1.9 1.9 0 1 0-1.7 0v2.2a5.3 5.3 0 0 0-2.1.9L7.3 6.6a2.1 2.1 0 1 0-1 1.4l5.4 3.9a5.3 5.3 0 0 0 .03 5.4 1.7 1.7 0 1 0 1.5.05 3.6 3.6 0 1 1 3.5-6 3.6 3.6 0 0 1-1.5 6.4l-.02 1.7a5.3 5.3 0 1 0 1.9-9.85Z"/></svg>
+      </span>
+      <span class="wordmark">HubSpot</span>
     </div>
 
-    <div class="nav-label">Workspace</div>
+    <div class="nav-label">CRM</div>
     <nav class="nav">
-      <button id="nav-new" class="active" data-view="new">
-        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-        New Incident
+      <button id="nav-contacts" type="button">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>
+        Contacts
       </button>
-      <button id="nav-queue" data-view="queue">
+      <button id="nav-companies" type="button">
+        <svg viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h0M9 13h0M9 17h0M15 9h0M15 13h0M15 17h0"/></svg>
+        Companies
+      </button>
+      <button id="nav-deals" class="active" data-view="new" type="button">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Deals
+      </button>
+      <button id="nav-tasks" type="button">
+        <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Tasks
+      </button>
+
+      <div class="nav-divider"></div>
+
+      <button id="nav-pipeline" data-view="queue" type="button">
         <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-        Queue
-        <span class="badge" id="queue-count">0</span>
+        Pipeline
+        <span class="count" id="queue-count">0</span>
       </button>
-      <button id="nav-reports" data-view="reports">
+      <button id="nav-reports" data-view="reports" type="button">
         <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         Reports
       </button>
     </nav>
-
-    <div class="sidebar-foot">
-      <div class="userchip">
-        <div class="avatar">JR</div>
-        <div class="meta">
-          <div class="uname">Jordan Reyes</div>
-          <div class="urole">On-call · SRE</div>
-        </div>
-        <svg class="more" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </div>
-    </div>
   </aside>
 
-  <main class="main" id="main">
+  <!-- ---------- MAIN ---------- -->
+  <div class="main">
     <div class="topbar">
-      <div class="crumbs">
-        <span>Workspace</span>
-        <span class="sep">/</span>
-        <span class="cur" id="crumb-view">New Incident</span>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <label for="global-search" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Search CRM</label>
+        <input id="global-search" type="text" placeholder="Search HubSpot">
       </div>
       <div class="right">
-        <span class="pill-live"><span class="live-dot"></span>All systems operational</span>
-        <button class="icon-btn" title="Search" aria-label="Search">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <button class="icon-btn" type="button" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
-        <button class="icon-btn" title="Notifications" aria-label="Notifications">
+        <button class="icon-btn" type="button" title="Notifications" aria-label="Notifications">
           <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
         </button>
         <div class="top-avatar" title="Jordan Reyes">JR</div>
       </div>
     </div>
 
-    <div class="content">
-      <!-- NEW INCIDENT -->
-      <section class="view active" id="view-new">
-        <h1>Log a new incident</h1>
-        <div class="sub">Capture the details of an active or suspected incident. Severity is set with a <b>/</b> slash-command, and a few fields sit below the fold.</div>
-
-        <div class="card">
-          <div class="card-head">
-            <span class="ctitle">Incident details</span>
-            <span class="ctag">Draft</span>
-          </div>
-          <div class="card-body">
-            <div class="field">
-              <label for="f-title">Incident title <span class="req">*</span></label>
-              <input type="text" id="f-title" placeholder="e.g. Checkout latency spike">
-            </div>
-
-            <div class="field slashwrap">
-              <label for="f-sev">Severity <code>/</code></label>
-              <input type="text" id="f-sev" placeholder="Type / and pick a severity" autocomplete="off">
-              <div class="slashmenu" id="slashmenu">
-                <div class="menu-head">Severity levels</div>
-                <div class="opt" data-val="sev1" data-label="SEV1 · Critical" data-color="#ff6b6b">
-                  <span class="dot" style="background:#ff6b6b"></span>
-                  <span class="otxt">SEV1<span class="odesc">Critical · full outage</span></span>
-                  <span class="k">/sev1</span>
-                </div>
-                <div class="opt" data-val="sev2" data-label="SEV2 · Major" data-color="#fbbf45">
-                  <span class="dot" style="background:#fbbf45"></span>
-                  <span class="otxt">SEV2<span class="odesc">Major · degraded service</span></span>
-                  <span class="k">/sev2</span>
-                </div>
-                <div class="opt" data-val="sev3" data-label="SEV3 · Minor" data-color="#34d399">
-                  <span class="dot" style="background:#34d399"></span>
-                  <span class="otxt">SEV3<span class="odesc">Minor · limited impact</span></span>
-                  <span class="k">/sev3</span>
-                </div>
-                <div class="menu-foot"><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>↵</kbd> select · <kbd>esc</kbd> dismiss</div>
-              </div>
-              <div class="hint">Type <code>/</code>, use <kbd>↑</kbd>/<kbd>↓</kbd>, then press <kbd>Enter</kbd> to insert the formatted severity token.</div>
-            </div>
-
-            <div class="field">
-              <label for="f-team">Owning team</label>
-              <select id="f-team">
-                <option value="">Select a team…</option>
-                <option>Platform</option><option>Payments</option><option>Growth</option>
-                <option>Infrastructure</option><option>Data</option>
-              </select>
-            </div>
-
-            <div class="spacer"></div><!-- forces scroll -->
-
-            <div class="field">
-              <label for="f-service">Affected service</label>
-              <input type="text" id="f-service" placeholder="e.g. checkout-api">
-            </div>
-
-            <div class="field">
-              <label for="f-notes">Description</label>
-              <textarea id="f-notes" placeholder="What's happening? Include impact, timeline, and any early signals."></textarea>
-            </div>
-
-            <label class="check" for="f-page">
-              <input type="checkbox" id="f-page">
-              <span>Page the on-call engineer immediately
-                <span class="sublabel">Triggers an urgent PagerDuty alert to the active rotation.</span>
-              </span>
-            </label>
-
-            <div class="actions">
-              <button class="primary" id="f-submit">
-                <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                Log incident
-              </button>
-              <span class="meta-note">Logged incidents appear in the Queue instantly.</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- QUEUE -->
-      <section class="view" id="view-queue">
-        <h1>Incident queue</h1>
-        <div class="sub">Every incident logged in this session, newest at the bottom.</div>
-        <div class="table-wrap">
-          <table id="queue-table">
-            <thead><tr><th>#</th><th>Title</th><th>Severity</th><th>Team</th><th>Service</th><th>On-call</th></tr></thead>
-            <tbody id="queue-body">
-              <tr><td colspan="6" class="empty">
-                <div class="eicon"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
-                <div class="etitle">No incidents logged yet</div>
-                <div>New incidents will show up here as soon as you log them.</div>
-              </td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- REPORTS -->
-      <section class="view" id="view-reports">
-        <h1>Reports</h1>
-        <div class="sub">A live summary of activity during this session.</div>
-        <div class="stats-grid">
-          <div class="stat s-blue">
-            <div class="stat-head">
-              <span class="sicon"><svg viewBox="0 0 24 24"><path d="M12 2 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg></span>
-              <span class="l">Incidents logged</span>
-            </div>
-            <div class="n" id="r-total">0</div>
-            <div class="delta">Total this session</div>
-          </div>
-          <div class="stat s-amber">
-            <div class="stat-head">
-              <span class="sicon"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span>
-              <span class="l">On-call paged</span>
-            </div>
-            <div class="n" id="r-paged">0</div>
-            <div class="delta">Urgent escalations triggered</div>
-          </div>
-        </div>
-      </section>
+    <div class="pagehead">
+      <div class="crumbs">
+        <a href="#">Deals</a>
+        <span class="sep">/</span>
+        <span class="cur" id="crumb-view">Create deal</span>
+      </div>
     </div>
-  </main>
+
+    <main id="main">
+      <div class="content">
+        <!-- ===================== CREATE DEAL ===================== -->
+        <section class="view active" id="view-new">
+          <div class="card">
+            <div class="card-head">
+              <div class="ctitle">Create deal</div>
+              <div class="csub">Enter the deal record details. Required fields are marked with an asterisk.</div>
+            </div>
+            <div class="card-body">
+              <div class="field">
+                <label for="f-dealname">Deal name <span class="req">*</span></label>
+                <div class="control">
+                  <input type="text" id="f-dealname" placeholder="e.g. Acme Corp — Annual subscription">
+                </div>
+                <div class="hint">A short, descriptive name for this deal. Appears across the pipeline and reports.</div>
+              </div>
+
+              <div class="field">
+                <label for="f-company">Associated company</label>
+                <div class="control">
+                  <input type="text" id="f-company" placeholder="Search or enter a company name">
+                </div>
+                <div class="hint">Link this deal to the company it belongs to.</div>
+              </div>
+
+              <div class="field">
+                <label for="f-amount">Amount</label>
+                <div class="control has-prefix">
+                  <span class="prefix">$</span>
+                  <input type="text" id="f-amount" placeholder="0.00" inputmode="decimal">
+                </div>
+                <div class="hint">Total contract value in USD. Numbers only.</div>
+              </div>
+
+              <div class="field">
+                <label for="f-owner">Deal owner</label>
+                <div class="control">
+                  <select id="f-owner">
+                    <option value="">Select an owner…</option>
+                    <option>Alex Rivera</option>
+                    <option>Sam Chen</option>
+                    <option>Jordan Lee</option>
+                    <option>Pat Kim</option>
+                  </select>
+                </div>
+                <div class="hint">The sales rep responsible for moving this deal forward.</div>
+              </div>
+
+              <div class="field slashwrap">
+                <label for="f-stage">Deal stage <code>/</code></label>
+                <div class="control">
+                  <input type="text" id="f-stage" placeholder="Type / to choose a stage" autocomplete="off">
+                </div>
+                <div class="slashmenu" id="slashmenu">
+                  <div class="menu-head">Sales pipeline stages</div>
+                  <div class="opt" data-val="appointment" data-label="Appointment scheduled" data-color="#516f90">
+                    <span class="dot" style="background:#516f90"></span>
+                    <span class="otxt">Appointment scheduled</span>
+                    <span class="k">/appt</span>
+                  </div>
+                  <div class="opt" data-val="qualified" data-label="Qualified to buy" data-color="#0091ae">
+                    <span class="dot" style="background:#0091ae"></span>
+                    <span class="otxt">Qualified to buy</span>
+                    <span class="k">/qual</span>
+                  </div>
+                  <div class="opt" data-val="presentation" data-label="Presentation scheduled" data-color="#7c4dff">
+                    <span class="dot" style="background:#7c4dff"></span>
+                    <span class="otxt">Presentation scheduled</span>
+                    <span class="k">/pres</span>
+                  </div>
+                  <div class="opt" data-val="decision" data-label="Decision maker bought-in" data-color="#ff7a59">
+                    <span class="dot" style="background:#ff7a59"></span>
+                    <span class="otxt">Decision maker bought-in</span>
+                    <span class="k">/dec</span>
+                  </div>
+                  <div class="opt" data-val="closedwon" data-label="Closed won" data-color="#00bda5">
+                    <span class="dot" style="background:#00bda5"></span>
+                    <span class="otxt">Closed won</span>
+                    <span class="k">/won</span>
+                  </div>
+                  <div class="opt" data-val="closedlost" data-label="Closed lost" data-color="#d94c53">
+                    <span class="dot" style="background:#d94c53"></span>
+                    <span class="otxt">Closed lost</span>
+                    <span class="k">/lost</span>
+                  </div>
+                  <div class="menu-foot"><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>↵</kbd> select · <kbd>esc</kbd> dismiss</div>
+                </div>
+                <div class="hint">Type <code>/</code>, move with <kbd>↑</kbd>/<kbd>↓</kbd>, then press <kbd>Enter</kbd> to insert the stage.</div>
+              </div>
+
+              <div class="spacer"></div><!-- forces scroll: fields below sit under the fold -->
+
+              <div class="field">
+                <label for="f-closedate">Close date</label>
+                <div class="control">
+                  <input type="text" id="f-closedate" placeholder="MM/DD/YYYY">
+                </div>
+                <div class="hint">The expected date this deal will close.</div>
+              </div>
+
+              <div class="field">
+                <label for="f-type">Deal type</label>
+                <div class="control">
+                  <select id="f-type">
+                    <option value="">Select a type…</option>
+                    <option>New business</option>
+                    <option>Existing business</option>
+                    <option>Renewal</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="f-priority">Priority</label>
+                <div class="control">
+                  <select id="f-priority">
+                    <option value="">Select a priority…</option>
+                    <option>Low</option>
+                    <option>Medium</option>
+                    <option>High</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="f-notes">Notes <span class="opt-tag">optional</span></label>
+                <div class="control">
+                  <textarea id="f-notes" placeholder="Add context for your team — next steps, blockers, key contacts…"></textarea>
+                </div>
+              </div>
+
+              <div class="field">
+                <div class="check">
+                  <input type="checkbox" id="f-task">
+                  <label for="f-task">Create a follow-up task
+                    <span class="sublabel">Adds a reminder task assigned to the deal owner for tomorrow.</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="toolbar">
+                <button class="primary" id="f-submit" type="button">Create deal</button>
+                <button class="ghost" id="f-cancel" type="button">Cancel</button>
+                <span class="spacer-flex">New deals are added to the pipeline immediately.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== PIPELINE ===================== -->
+        <section class="view" id="view-queue">
+          <h1>Pipeline</h1>
+          <div class="sub">Every deal created in this session, newest at the bottom.</div>
+          <div class="table-wrap">
+            <table id="queue-table">
+              <thead><tr><th>#</th><th>Deal name</th><th>Company</th><th>Amount</th><th>Stage</th><th>Owner</th></tr></thead>
+              <tbody id="queue-body">
+                <tr><td colspan="6" class="empty">
+                  <div class="eicon"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+                  <div class="etitle">No deals yet</div>
+                  <div>New deals will appear here as soon as you create them.</div>
+                </td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ===================== REPORTS ===================== -->
+        <section class="view" id="view-reports">
+          <h1>Reports</h1>
+          <div class="sub">A live summary of deal activity during this session.</div>
+          <div class="stats-grid">
+            <div class="stat">
+              <div class="l">Deals created</div>
+              <div class="n" id="r-total">0</div>
+              <div class="delta">Total this session</div>
+            </div>
+            <div class="stat">
+              <div class="l">Pipeline value</div>
+              <div class="n" id="r-value">$0</div>
+              <div class="delta">Sum of all deal amounts</div>
+            </div>
+            <div class="stat">
+              <div class="l">Follow-up tasks</div>
+              <div class="n" id="r-tasks">0</div>
+              <div class="delta">Reminders created with deals</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
 </div>
 
 <div class="toast" id="toast">
   <span class="tcheck"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></span>
-  <span class="ttext">Incident logged</span>
+  <span class="ttext">Deal created</span>
 </div>
 
 <script>
 (function(){
-  const incidents = [];
+  const deals = [];
   const $ = s => document.querySelector(s);
-  // --- nav ---
-  document.querySelectorAll('.nav button').forEach(b=>{
-    b.addEventListener('click',()=>{
-      document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
-      b.classList.add('active');
-      const v=b.dataset.view;
-      document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
-      $('#view-'+v).classList.add('active');
-      const crumb=$('#crumb-view'); if(crumb) crumb.textContent=b.textContent.trim().replace(/\s+\d+$/,'');
-      $('#main').scrollTop=0;
+
+  // ---------- nav (only Deals / Pipeline / Reports switch views) ----------
+  document.querySelectorAll('.nav button[data-view]').forEach(navButton=>{
+    navButton.addEventListener('click',()=>{
+      document.querySelectorAll('.nav button').forEach(other=>other.classList.remove('active'));
+      navButton.classList.add('active');
+      const viewName = navButton.dataset.view;
+      document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+      $('#view-'+viewName).classList.add('active');
+      const labels = {new:'Create deal', queue:'Pipeline', reports:'Reports'};
+      const crumb = $('#crumb-view'); if(crumb) crumb.textContent = labels[viewName] || 'Deals';
+      $('#main').scrollTop = 0;
     });
   });
-  // --- slash command on severity field ---
-  const sev=$('#f-sev'), menu=$('#slashmenu');
-  let sel=0, chosenSeverity=null;
-  const opts=()=>Array.from(menu.querySelectorAll('.opt'));
-  function openMenu(){menu.classList.add('open');sel=0;paint();}
-  function closeMenu(){menu.classList.remove('open');}
-  function paint(){opts().forEach((o,i)=>o.classList.toggle('sel',i===sel));}
-  function choose(i){
-    const o=opts()[i]; if(!o)return;
-    chosenSeverity={val:o.dataset.val,label:o.dataset.label,color:o.dataset.color};
-    sev.value=o.dataset.label;           // auto-formatted token text
-    sev.style.color=o.dataset.color;
-    sev.style.fontWeight='600';
+
+  // ---------- slash command on the Deal stage field ----------
+  const stageField = $('#f-stage');
+  const slashMenu = $('#slashmenu');
+  let highlightedIndex = 0;
+  let chosenStage = null;
+  const options = () => Array.from(slashMenu.querySelectorAll('.opt'));
+  function openMenu(){ slashMenu.classList.add('open'); highlightedIndex = 0; paintHighlight(); }
+  function closeMenu(){ slashMenu.classList.remove('open'); }
+  function paintHighlight(){ options().forEach((opt,i)=>opt.classList.toggle('sel', i===highlightedIndex)); }
+  function chooseStage(index){
+    const opt = options()[index]; if(!opt) return;
+    chosenStage = { val:opt.dataset.val, label:opt.dataset.label, color:opt.dataset.color };
+    stageField.value = opt.dataset.label;       // insert the formatted token text
+    stageField.style.color = opt.dataset.color;
+    stageField.style.fontWeight = '600';
     closeMenu();
   }
-  sev.addEventListener('input',e=>{
-    if(sev.value.trim()==='/' || sev.value.endsWith('/')){openMenu();}
-    else if(!sev.value.startsWith('/')){/* typed real text */}
+  stageField.addEventListener('input',()=>{
+    if(stageField.value.trim()==='/' || stageField.value.endsWith('/')){ openMenu(); }
   });
-  sev.addEventListener('keydown',e=>{
-    if(!menu.classList.contains('open')){
-      if(e.key==='/' ){ setTimeout(openMenu,0); }
+  stageField.addEventListener('keydown',e=>{
+    if(!slashMenu.classList.contains('open')){
+      if(e.key==='/'){ setTimeout(openMenu,0); }
       return;
     }
-    if(e.key==='ArrowDown'){e.preventDefault();sel=(sel+1)%opts().length;paint();}
-    else if(e.key==='ArrowUp'){e.preventDefault();sel=(sel-1+opts().length)%opts().length;paint();}
-    else if(e.key==='Enter'){e.preventDefault();choose(sel);}
-    else if(e.key==='Escape'){closeMenu();}
+    if(e.key==='ArrowDown'){ e.preventDefault(); highlightedIndex=(highlightedIndex+1)%options().length; paintHighlight(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); highlightedIndex=(highlightedIndex-1+options().length)%options().length; paintHighlight(); }
+    else if(e.key==='Enter'){ e.preventDefault(); chooseStage(highlightedIndex); }
+    else if(e.key==='Escape'){ closeMenu(); }
   });
-  opts().forEach((o,i)=>o.addEventListener('click',()=>choose(i)));
-  // --- submit ---
+  options().forEach((opt,i)=>opt.addEventListener('click',()=>chooseStage(i)));
+
+  // ---------- amount formatting helper ----------
+  function formatMoney(rawAmount){
+    const number = parseFloat(String(rawAmount).replace(/[^0-9.]/g,''));
+    if(isNaN(number) || number===0) return '$0';
+    return '$' + number.toLocaleString('en-US', { maximumFractionDigits:0 });
+  }
+
+  // ---------- reset the form to a clean draft ----------
+  function resetForm(){
+    $('#f-dealname').value='';
+    $('#f-company').value='';
+    $('#f-amount').value='';
+    $('#f-owner').value='';
+    stageField.value=''; stageField.style.color=''; stageField.style.fontWeight=''; chosenStage=null;
+    $('#f-closedate').value='';
+    $('#f-type').value='';
+    $('#f-priority').value='';
+    $('#f-notes').value='';
+    $('#f-task').checked=false;
+    $('#main').scrollTop=0;
+    $('#f-dealname').focus();
+  }
+
+  // ---------- submit: create the deal ----------
   $('#f-submit').addEventListener('click',()=>{
-    const rec={
-      n:incidents.length+1,
-      title:$('#f-title').value.trim(),
-      sev:chosenSeverity?chosenSeverity.label:'(none)',
-      sevColor:chosenSeverity?chosenSeverity.color:'#8b94a3',
-      team:$('#f-team').value||'(none)',
-      service:$('#f-service').value.trim()||'(none)',
-      page:$('#f-page').checked
+    const record = {
+      n: deals.length+1,
+      name: $('#f-dealname').value.trim(),
+      company: $('#f-company').value.trim() || '—',
+      amountRaw: parseFloat(String($('#f-amount').value).replace(/[^0-9.]/g,'')) || 0,
+      amountText: formatMoney($('#f-amount').value),
+      owner: $('#f-owner').value || '—',
+      stage: chosenStage ? chosenStage.label : '(none)',
+      stageColor: chosenStage ? chosenStage.color : '#7c98b6',
+      task: $('#f-task').checked
     };
-    incidents.push(rec);
-    // update queue
-    const body=$('#queue-body');
-    if(incidents.length===1) body.innerHTML='';
-    const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${rec.n}</td><td>${rec.title||'(untitled)'}</td>
-      <td><span class="badgepill" style="background:${rec.sevColor}22;color:${rec.sevColor}">${rec.sev}</span></td>
-      <td>${rec.team}</td><td>${rec.service}</td><td>${rec.page?'✓':'—'}</td>`;
-    body.appendChild(tr);
-    $('#queue-count').textContent=incidents.length;
-    $('#r-total').textContent=incidents.length;
-    $('#r-paged').textContent=incidents.filter(i=>i.page).length;
-    // toast
-    const t=$('#toast');const tt=t.querySelector('.ttext');
-    if(tt){tt.textContent=`Incident #${rec.n} logged`;}else{t.textContent=`Incident #${rec.n} logged`;}
-    t.classList.add('show');
-    setTimeout(()=>t.classList.remove('show'),1600);
-    // reset form
-    $('#f-title').value='';$('#f-service').value='';$('#f-notes').value='';
-    $('#f-team').value='';$('#f-page').checked=false;
-    sev.value='';sev.style.color='';sev.style.fontWeight='';chosenSeverity=null;
-    $('#main').scrollTop=0;$('#f-title').focus();
+    deals.push(record);
+
+    const body = $('#queue-body');
+    if(deals.length===1) body.innerHTML='';
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${record.n}</td>
+      <td class="deal-name">${record.name || '(untitled deal)'}</td>
+      <td>${record.company}</td>
+      <td class="amount">${record.amountText}</td>
+      <td><span class="stage-pill" style="background:${record.stageColor}1f;color:${record.stageColor}">${record.stage}</span></td>
+      <td>${record.owner}</td>`;
+    body.appendChild(row);
+
+    $('#queue-count').textContent = deals.length;
+    $('#r-total').textContent = deals.length;
+    $('#r-value').textContent = formatMoney(deals.reduce((sum,d)=>sum+d.amountRaw,0));
+    $('#r-tasks').textContent = deals.filter(d=>d.task).length;
+
+    const toast = $('#toast');
+    const toastText = toast.querySelector('.ttext');
+    if(toastText){ toastText.textContent = 'Deal created'; }
+    toast.classList.add('show');
+    setTimeout(()=>toast.classList.remove('show'), 1700);
+
+    resetForm();
   });
-  // clean start
-  window.addEventListener('DOMContentLoaded',()=>{$('#main').scrollTop=0;});
+
+  // ---------- cancel: just clear the draft ----------
+  $('#f-cancel').addEventListener('click', resetForm);
+
+  window.addEventListener('DOMContentLoaded',()=>{ $('#main').scrollTop=0; });
 })();
 </script>
 <script src="demo-mode.js"></script>
