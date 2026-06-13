@@ -202,3 +202,36 @@ Other additions:
 - `scripts/install_cua.sh` — installs the `cua-driver` CLI dependency.
 
 > Note: `cua-driver` 0.5.3 is an external CLI dependency invoked as `cua-driver call <tool> <json>`; it is not part of this repo. The Cloudflare Worker auth and base Clicky setup are unchanged — see the setup sections above.
+
+---
+
+# Live teachable-agent demo (`v0.5.0`)
+
+The headline demo is a **real, steerable Claude agent** that operates a deliberately tedious HubSpot-style CRM — full runbook + architecture in **[`demo/ops-console/README.md`](demo/ops-console/README.md)**.
+
+**Record it now:**
+```bash
+open -na "Google Chrome" --args --new-window \
+  --app="file:///Users/khani/Desktop/projs/monkey/demo/ops-console/index.html?demo=1" \
+  --window-size=1280,940
+```
+Auto-runs; record with Cmd+Shift+5. For a steerable live take, open **without** `?demo=1`, then use the floating bar: **Run** a task, and **Teach** a correction mid-run.
+
+**How it works:** `demo-mode.js` runs the same `observe → ask Claude → act → re-observe` loop as the Swift Monkeybot, but in-browser against the DOM (reliable for live demos — no cua/Apple-Events fragility). It's **form-generic** (auto-discovers fields), **steerable** (type any task), and **coachable** (corrections enter the agent's context live). Visuals: Clicky triangle pointer + Monkeybot's dialogue in a bubble at the cursor. Claude is reached through the Cloudflare Worker `/chat` (CORS enabled).
+
+## Two ways Monkeybot runs the loop
+| Path | Surface | Reliability | Use |
+|------|---------|-------------|-----|
+| **In-browser agent** (`demo/ops-console/demo-mode.js`) | the CRM's DOM | high (no OS automation) | the live judge demo |
+| **Swift app + cua-driver** (`leanring-buddy/MonkeyAgentLoop.swift` …) | any macOS app via cua AX/DOM | depends on TCC/Apple-Events | true cross-app computer use |
+
+Hands-on testing notes (why the browser path is the demo path) are in `TEST_RESULTS.md`.
+
+## Version history
+- `v0.1.0-clicky-base` — base Clicky (Farza)
+- `v0.2.0` — Monkeybot MVP: cua agent loop, HUD, trace, hands-free
+- `v0.3.0` — fallback page, browser/DOM grounding, re-run replay
+- `v0.3.1` — unit test suite + testability seams
+- `v0.3.2` — onboarding removal + adversarial-review polish
+- `v0.4.0` — teachable computer-use demo (Ops Console)
+- `v0.5.0` — **real teachable agent on a HubSpot-style CRM** (current demo)
