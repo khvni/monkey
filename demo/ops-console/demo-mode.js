@@ -54,9 +54,9 @@
 
   const bar = document.createElement("div"); bar.id = "mb-bar";
   bar.innerHTML = `<span class="tag"><span class="d"></span>Monkeybot</span>
-    <input id="mb-task" placeholder="Give Monkeybot a task…" value="Create a deal: Acme Corp annual renewal, $48,000, owner Sam Chen, stage Qualified to buy, close 09/30/2026, type Renewal, priority High, and add a follow-up task.">
+    <input id="mb-task" placeholder="Give Monkeybot a task…" value="Create a deal: Acme Corp annual renewal, $48,000, owner Sam Chen, stage Qualified to buy, close 09/30/2026, type Renewal.">
     <button id="mb-run">Run</button>
-    <input id="mb-coachin" placeholder="Coach it (e.g. the stage field uses the / command)…" style="flex:.9">
+    <input id="mb-coachin" placeholder="Coach it (e.g. renewals are always High priority + add a follow-up task)…" style="flex:.9">
     <button id="mb-coach">Teach</button>`;
   document.body.appendChild(bar);
 

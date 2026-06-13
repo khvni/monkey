@@ -88,3 +88,23 @@ open -na "Google Chrome" --args --new-window \
 
 ## Security note
 The Worker's `/chat` is currently **open CORS (`*`)** for the demo — anyone with the URL can spend the Anthropic key. Scope `access-control-allow-origin` (or add a shared-secret header) before making the repo public.
+
+---
+
+## 60-second script — LIVE coaching (recommended)
+
+Open **without** `?demo=1` so the floating bar waits. The task box is pre-filled (it deliberately omits priority + follow-up so your coaching has a visible effect).
+
+**Rehearse once first** (warms Chrome's cache + confirms the Worker responds + you see the timing). Then reload and record.
+
+| Time | You do | You say |
+|------|--------|---------|
+| 0:00 | (window up, agent idle) | "This is Monkeybot — a teachable agent. My thesis: a great agent employee, like a great person, is **coachable**. Teach it once, and it handles the rest — even boring manual SaaS work." |
+| 0:10 | Type in the **coach** box → **Teach**: `For renewals, always set priority to High and add a follow-up task.` | "First I'll coach it — in plain English." (a teal "You — coaching" bubble appears) |
+| 0:17 | Click **Run** (task is pre-filled) | "Now the task: create this renewal deal." |
+| 0:22–0:48 | (hands off — narrate) | "It reads the form and decides each action live — Claude, not a script. Watch it handle what people hate: the **slash-command** for deal stage, the fields **below the fold** it scrolls to, the dropdowns. And notice — my task never said 'High priority' or 'follow-up task'. It's doing those because I **coached** it." |
+| 0:48 | (deal lands in Pipeline) | "Nothing's scripted — hand it any deal, coach it in plain English, and it adapts. A teachable agent doing real GUI busywork." |
+
+**Why this lands:** the agent sets Priority = High and checks "Create a follow-up task" even though your task never mentioned them — proof it learned from your live coaching, not a script.
+
+**If a step stalls:** it's the network/Worker (it calls Claude). Just click **Run** again — it's a real agent, safe to re-run.
