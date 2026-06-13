@@ -19,6 +19,8 @@ Here's the [original tweet](https://x.com/FarzaTV/status/2041314633978659092) th
 
 This is the open-source version of Clicky for those that want to hack on it, build their own features, or just see how it works under the hood.
 
+> This fork adds **Monkeybot**, a voice-driven on-screen agent layered on top of Clicky. For exactly what was kept from base Clicky versus what was added, see [Base Clicky vs Monkeybot changes built today](#base-clicky-vs-monkeybot-changes-built-today) at the bottom.
+
 ## Get started with Claude Code
 
 The fastest way to get this running is with [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
@@ -160,3 +162,43 @@ CLAUDE.md                # Full architecture doc (agents read this)
 PRs welcome. If you're using Claude Code, it already knows the codebase — just tell it what you want to build and point it at `CLAUDE.md`.
 
 Got feedback? DM me on X [@farzatv](https://x.com/farzatv).
+
+---
+
+# Base Clicky vs Monkeybot changes built today
+
+This repo is a fork of [farzaa/clicky](https://github.com/farzaa/clicky). The base Clicky app (tagged `v0.1.0-clicky-base`) was built by Farza and is the foundation everything below sits on. The **Monkeybot** work (`v0.2.0`) adds a voice-driven on-screen agent on top of that foundation. **Most of Clicky was NOT built today** — the list below is precise about which is which.
+
+## Kept from base Clicky (NOT built today)
+
+These already existed in base Clicky and were reused as-is:
+
+- **SwiftUI / AppKit menu-bar app shell** — the menu-bar (no-dock) app and its `NSPanel` windows.
+- **Push-to-talk pointing pipeline** — hold **Ctrl + Option** to talk; Claude can point the cursor at on-screen elements.
+- **AssemblyAI streaming transcription** — real-time speech-to-text over a websocket.
+- **ScreenCaptureKit screenshots** — screen capture for context.
+- **Claude API via Cloudflare Worker `/chat`** — streaming SSE proxy that holds the API keys.
+- **ElevenLabs TTS** — spoken responses.
+- **Transparent cursor overlay** — the blue cursor that flies to UI elements.
+- **PostHog analytics**.
+- **DesignSystem (DS) tokens** — shared design tokens.
+
+## Built today (Monkeybot — `v0.2.0`)
+
+New files:
+
+- `MonkeyAction.swift` — strict JSON action schema (with per-kind validation).
+- `AgentRuntime.swift` — agent runtime protocol + shared `AgentContext`.
+- `ClaudeAgentRuntime.swift` — the Claude "brain"; emits exactly one JSON action per turn. Reuses the existing Clicky `ClaudeAPI` instance (no second Cloudflare connection).
+- `CuaDriverClient.swift` — `Process` wrapper over the `cua-driver` 0.5.3 CLI (tools: `list_windows`, `get_window_state`, `click`, `type_text`, `set_value`, `scroll`, `press_key`, `hotkey`).
+- `MonkeyAgentLoop.swift` — observe-act-verify loop; re-observes every turn (element indices are snapshot-scoped), max 20 steps.
+- `MonkeyTraceRecorder.swift` — per-run traces under `runs/<timestamp>-<slug>/` (`task.txt`, `transcript.txt`, `steps.jsonl`, `observations/`, `screenshots/`, `final_summary.md`).
+- `MonkeybotHUDView.swift` — floating HUD showing live status (Listening / Running / Idle, current step, last action, trace path).
+
+Other additions:
+
+- **Hands-free dictation** — **Ctrl + Option + Space** toggles a continuous dictation session that auto-submits on stop; pressing **Ctrl + Option** stops and submits.
+- **Monkeybot mode toggle + preflight wiring** — across `CompanionManager`, `CompanionPanelView`, `MenuBarPanelManager`, and `GlobalPushToTalkShortcutMonitor` (mode toggle, routing transcripts into the agent loop, and the advisory cua-driver / TCC preflight status row).
+- `scripts/install_cua.sh` — installs the `cua-driver` CLI dependency.
+
+> Note: `cua-driver` 0.5.3 is an external CLI dependency invoked as `cua-driver call <tool> <json>`; it is not part of this repo. The Cloudflare Worker auth and base Clicky setup are unchanged — see the setup sections above.
