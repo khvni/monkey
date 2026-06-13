@@ -59,6 +59,49 @@ final class MonkeyAgentLoop: ObservableObject {
     /// loop boundary so the user's Stop button takes effect promptly.
     private var stopRequested: Bool = false
 
+    /// Whether the cua `page` (browser/DOM) tool is usable for the CURRENT run.
+    ///
+    /// Decided ONCE per run by a single cheap `pageGetText` probe after the
+    /// target window is selected. When true, observations are ENRICHED with a
+    /// CSS-addressable DOM digest and a `click` carrying `css_selector` is routed
+    /// through `pageClickElement`. The moment any page-tool call throws, this is
+    /// flipped to false and the loop reverts to the verified AX `element_index`
+    /// path for the remainder of the run — a page-tool error NEVER ends the run.
+    /// It begins false so that, absent a successful probe, behavior is identical
+    /// to the v0.2.0 AX-only path.
+    private var browserGroundingActive: Bool = false
+
+    /// Sentinel header the loop prepends to enriched observations and the runtime
+    /// keys off to decide whether to mention `css_selector` in its prompt. Kept as
+    /// a single shared constant so the two files can never drift on the literal.
+    /// `nonisolated` so the (non-MainActor) runtime statics can read it without an
+    /// actor hop — it is an immutable `String` constant, trivially `Sendable`.
+    nonisolated static let domDigestHeader = "# DOM (CSS-addressable)"
+
+    /// Interactive CSS selectors the DOM digest enumerates when browser grounding
+    /// is active. Mirrors the contract's interactive set (input/select/button/a/
+    /// textarea plus ARIA-role-bearing nodes).
+    private static let domDigestSelectors = "input, select, button, a, textarea, [role]"
+
+    /// Attributes requested for each DOM digest element so the model can pick a
+    /// stable selector (prefer #id or [aria-label]) and humans can read the row.
+    private static let domDigestAttributes = ["id", "name", "aria-label", "type", "placeholder", "role"]
+
+    /// Hard cap on DOM digest rows so a huge page can't blow up the prompt.
+    private static let domDigestRowLimit = 60
+
+    /// One-shot note set by `execute(...)` when a guarded page-tool path did
+    /// something noteworthy this turn (e.g. a `css_selector` click that fell back
+    /// to AX). The loop appends it to the step record's result, then clears it.
+    /// Never carries a fatal condition — page-tool failures are always recovered.
+    private var pendingStepNote: String? = nil
+
+    /// Feature 3b — whether this run asked the driver to record a cua trajectory.
+    /// Set true only after `startRecording` is attempted at run start. Guards the
+    /// terminal-path `stopRecording` so we don't issue an unconditional stop for a
+    /// run that never tried to record. The stop itself is still best-effort.
+    private var cuaRecordingAttempted: Bool = false
+
     /// Number of screenshots from the most recent observations to keep in the
     /// model's context. Disk retains every artifact; the model only needs the
     /// freshest few to stay grounded without blowing up the prompt.
@@ -83,6 +126,9 @@ final class MonkeyAgentLoop: ObservableObject {
     /// or a failure occurs.
     func run(task: String, voiceTranscript: String) async {
         stopRequested = false
+        // Start every run AX-only; the post-window-select probe may turn this on.
+        browserGroundingActive = false
+        cuaRecordingAttempted = false
 
         let traceSlug = Self.makeTraceSlug(fromTask: task)
         let traceRecorder = MonkeyTraceRecorder(
@@ -91,6 +137,24 @@ final class MonkeyAgentLoop: ObservableObject {
             slug: traceSlug
         )
         let traceDirectoryPath = traceRecorder.runDirectoryURL.path
+
+        // Feature 3b — OPTIONAL cua trajectory recording. Best-effort and purely
+        // additive: this asks the driver to write per-turn cua folders
+        // (app_state / screenshot / action.json / click.png) into a
+        // `cua-trajectory/` subdirectory of THIS run's trace dir, alongside our
+        // own `steps.jsonl`. Video stays OFF by default. If recording is
+        // unavailable (older driver, daemon down, missing grant) the `try?`
+        // swallows the throw and the run proceeds exactly like v0.2.0 — recording
+        // never gates, never ends, and never alters a run. Stopped on EVERY
+        // terminal path below.
+        let cuaTrajectoryDirectory = traceRecorder.runDirectoryURL
+            .appendingPathComponent("cua-trajectory", isDirectory: true)
+            .path
+        cuaRecordingAttempted = true
+        try? await cuaDriverClient.startRecording(
+            outputDir: cuaTrajectoryDirectory,
+            recordVideo: false
+        )
 
         state = MonkeyLoopState(
             isRunning: true,
@@ -109,7 +173,7 @@ final class MonkeyAgentLoop: ObservableObject {
         let targetWindow: CuaWindow
         do {
             guard let chromeWindow = try await locateFrontmostChromeWindow() else {
-                surfaceUserQuestion(
+                await surfaceUserQuestion(
                     "I could not find an open Google Chrome window. Please open Chrome and try again.",
                     recorder: traceRecorder
                 )
@@ -117,7 +181,7 @@ final class MonkeyAgentLoop: ObservableObject {
             }
             targetWindow = chromeWindow
         } catch {
-            finishWithFailure(
+            await finishWithFailure(
                 "Failed to list windows: \(Self.describe(error))",
                 recorder: traceRecorder
             )
@@ -142,6 +206,16 @@ final class MonkeyAgentLoop: ObservableObject {
             windowId: targetWindow.windowId
         )
 
+        // Probe browser/DOM grounding ONCE for this run (a single cheap
+        // page.get_text). This is purely additive: if the page tool is
+        // unavailable (Apple Events off / Automation TCC missing / older driver)
+        // the probe returns false and the entire loop behaves exactly like the
+        // v0.2.0 AX `element_index` path. `browserGroundingProbe` never throws.
+        browserGroundingActive = await cuaDriverClient.browserGroundingProbe(
+            pid: targetWindow.pid,
+            windowId: targetWindow.windowId
+        )
+
         // Rolling history fed back to the runtime, plus the screenshots kept in
         // the model's context (most recent first .. trimmed to the window size).
         var priorStepRecords: [MonkeyStepRecord] = []
@@ -153,12 +227,21 @@ final class MonkeyAgentLoop: ObservableObject {
             state.statusLine = "observing"
             currentObservation = try await observeTargetWindow(targetWindow, stepNumber: 0)
         } catch {
-            finishWithFailure(
+            await finishWithFailure(
                 "Initial observation failed: \(Self.describe(error))",
                 recorder: traceRecorder
             )
             return
         }
+
+        // Observation markdown the MODEL sees. When browser grounding is active
+        // this is the full AX tree PLUS a CSS-addressable DOM digest; when it is
+        // not (the v0.2.0 path) it is exactly the AX `tree_markdown`. The trace
+        // recorder always stores the raw AX tree, never the enrichment.
+        var currentObservationMarkdownForModel = await enrichedObservationMarkdown(
+            axTreeMarkdown: currentObservation.treeMarkdown,
+            window: targetWindow
+        )
 
         // Record the initial observation as step 0's context and seed screenshots.
         traceRecorder.recordObservation(
@@ -182,7 +265,7 @@ final class MonkeyAgentLoop: ObservableObject {
         var stepNumber = 1
         while stepNumber <= maximumStepCount {
             if stopRequested {
-                finishStopped(recorder: traceRecorder)
+                await finishStopped(recorder: traceRecorder)
                 return
             }
 
@@ -193,7 +276,7 @@ final class MonkeyAgentLoop: ObservableObject {
                 task: task,
                 voiceTranscript: voiceTranscript,
                 targetApplicationName: targetWindow.appName,
-                observationMarkdown: Self.capObservation(currentObservation.treeMarkdown),
+                observationMarkdown: Self.capObservation(currentObservationMarkdownForModel),
                 recentScreenshotFilePaths: recentScreenshotPaths,
                 priorSteps: priorStepRecords,
                 stepNumber: stepNumber,
@@ -212,12 +295,12 @@ final class MonkeyAgentLoop: ObservableObject {
                     recorder: traceRecorder,
                     priorStepRecords: &priorStepRecords
                 )
-                finishWithFailure(failureSummary, recorder: traceRecorder)
+                await finishWithFailure(failureSummary, recorder: traceRecorder)
                 return
             }
 
             if stopRequested {
-                finishStopped(recorder: traceRecorder)
+                await finishStopped(recorder: traceRecorder)
                 return
             }
 
@@ -253,7 +336,7 @@ final class MonkeyAgentLoop: ObservableObject {
                 )
                 traceRecorder.recordStep(record, observationFile: nil, screenshotFile: nil)
                 priorStepRecords.append(record)
-                finishDone(summary: summaryText, recorder: traceRecorder)
+                await finishDone(summary: summaryText, recorder: traceRecorder)
                 return
 
             case .ask_user:
@@ -266,7 +349,7 @@ final class MonkeyAgentLoop: ObservableObject {
                 )
                 traceRecorder.recordStep(record, observationFile: nil, screenshotFile: nil)
                 priorStepRecords.append(record)
-                surfaceUserQuestion(question, recorder: traceRecorder)
+                await surfaceUserQuestion(question, recorder: traceRecorder)
                 return
 
             case .wait:
@@ -285,6 +368,7 @@ final class MonkeyAgentLoop: ObservableObject {
                 // --- EXECUTE via cua-driver -------------------------------
                 state.statusLine = Self.statusLine(for: decidedAction)
                 state.lastActionSummary = Self.actionSummary(for: decidedAction)
+                pendingStepNote = nil
                 do {
                     try await execute(action: decidedAction, on: targetWindow)
                 } catch {
@@ -296,13 +380,13 @@ final class MonkeyAgentLoop: ObservableObject {
                         recorder: traceRecorder,
                         priorStepRecords: &priorStepRecords
                     )
-                    finishWithFailure(executionSummary, recorder: traceRecorder)
+                    await finishWithFailure(executionSummary, recorder: traceRecorder)
                     return
                 }
             }
 
             if stopRequested {
-                finishStopped(recorder: traceRecorder)
+                await finishStopped(recorder: traceRecorder)
                 return
             }
 
@@ -320,9 +404,16 @@ final class MonkeyAgentLoop: ObservableObject {
                     recorder: traceRecorder,
                     priorStepRecords: &priorStepRecords
                 )
-                finishWithFailure(observeSummary, recorder: traceRecorder)
+                await finishWithFailure(observeSummary, recorder: traceRecorder)
                 return
             }
+
+            // Refresh the model-facing markdown (AX tree, plus DOM digest when
+            // browser grounding is still active). Recorder keeps the raw AX tree.
+            currentObservationMarkdownForModel = await enrichedObservationMarkdown(
+                axTreeMarkdown: currentObservation.treeMarkdown,
+                window: targetWindow
+            )
 
             // Persist the post-action observation + screenshot, refresh context.
             let observationFile = traceRecorder.recordObservation(
@@ -348,10 +439,18 @@ final class MonkeyAgentLoop: ObservableObject {
                 after: currentObservation
             )
 
+            // Fold in any guarded page-tool note (e.g. a css_selector click that
+            // fell back to AX) so the trace and the model's history both record it.
+            var stepResult = Self.actionSummary(for: decidedAction)
+            if let note = pendingStepNote, !note.isEmpty {
+                stepResult += " — \(note)"
+            }
+            pendingStepNote = nil
+
             let stepRecord = MonkeyStepRecord(
                 stepNumber: stepNumber,
                 action: decidedAction,
-                result: Self.actionSummary(for: decidedAction),
+                result: stepResult,
                 verification: verificationSummary
             )
             traceRecorder.recordStep(
@@ -365,7 +464,7 @@ final class MonkeyAgentLoop: ObservableObject {
         }
 
         // 4. Hit the step ceiling without a `done`.
-        finishStepLimit(recorder: traceRecorder)
+        await finishStepLimit(recorder: traceRecorder)
     }
 
     // MARK: - Target window selection
@@ -432,6 +531,112 @@ final class MonkeyAgentLoop: ObservableObject {
         )
     }
 
+    // MARK: - Browser/DOM grounding (additive enrichment, guarded)
+
+    /// The markdown the MODEL sees for an observation.
+    ///
+    /// - When `browserGroundingActive` is false (the v0.2.0 path), this returns
+    ///   the AX `tree_markdown` UNCHANGED — byte-for-byte identical to before.
+    /// - When active, it appends a compact, CSS-addressable DOM digest under the
+    ///   shared `# DOM (CSS-addressable)` header so the model can target web
+    ///   controls by stable selector. The FULL AX tree is ALWAYS kept first, so
+    ///   `element_index` remains valid and the AX path keeps working untouched.
+    ///
+    /// Resilience: the digest comes from a single best-effort `pageQueryDom`. If
+    /// it throws (page tool became unusable mid-run), this DISABLES browser
+    /// grounding for the rest of the run and returns just the AX tree — it NEVER
+    /// throws and NEVER ends the run.
+    private func enrichedObservationMarkdown(
+        axTreeMarkdown: String,
+        window: CuaWindow
+    ) async -> String {
+        guard browserGroundingActive else { return axTreeMarkdown }
+
+        let elements: [CuaPageElement]
+        do {
+            elements = try await cuaDriverClient.pageQueryDom(
+                pid: window.pid,
+                windowId: window.windowId,
+                cssSelector: Self.domDigestSelectors,
+                attributes: Self.domDigestAttributes
+            )
+        } catch {
+            // Lost the page tool — revert to AX-only for the remainder of the run.
+            browserGroundingActive = false
+            return axTreeMarkdown
+        }
+
+        let digest = Self.formatDomDigest(elements)
+        guard !digest.isEmpty else {
+            // Page tool answered but yielded nothing useful; keep AX as the sole
+            // grounding this turn (do NOT disable — the probe succeeded).
+            return axTreeMarkdown
+        }
+
+        // AX tree FIRST (so element_index keeps working), DOM digest appended.
+        return axTreeMarkdown + "\n\n" + digest
+    }
+
+    /// Render `query_dom` rows into a compact, model-readable digest. Each line is
+    /// a CSS-addressable interactive element with its most stable attributes. The
+    /// model is told (in the runtime prompt) to prefer #id or [aria-label].
+    /// Returns "" when there is nothing addressable to add.
+    private static func formatDomDigest(_ elements: [CuaPageElement]) -> String {
+        var lines: [String] = []
+        for element in elements {
+            let line = formatDomDigestRow(element)
+            if !line.isEmpty { lines.append(line) }
+            if lines.count >= domDigestRowLimit { break }
+        }
+        guard !lines.isEmpty else { return "" }
+
+        var section = "\(domDigestHeader)\n"
+        section += "Interactive web elements addressable by CSS selector (prefer a stable selector like #id or [aria-label]). "
+        section += "The accessibility tree above still works via element_index — use whichever is more reliable.\n"
+        section += lines.joined(separator: "\n")
+        if elements.count > lines.count {
+            section += "\n…(\(elements.count - lines.count) more element(s) omitted)"
+        }
+        return section
+    }
+
+    /// One DOM digest line: tag + best stable selector + key attributes + text.
+    /// Skips rows that carry no addressable handle at all.
+    private static func formatDomDigestRow(_ element: CuaPageElement) -> String {
+        let attributes = element.attributes ?? [:]
+
+        // Choose the most stable selector to show: explicit selector, else #id,
+        // else [name=…], else [aria-label=…]. Used only for display/guidance —
+        // the model still emits its own css_selector.
+        let identifier = attributes["id"].flatMap { $0.isEmpty ? nil : "#\($0)" }
+        let nameSelector = attributes["name"].flatMap { $0.isEmpty ? nil : "[name=\"\($0)\"]" }
+        let ariaSelector = attributes["aria-label"].flatMap { $0.isEmpty ? nil : "[aria-label=\"\($0)\"]" }
+        let stableSelector = element.selector
+            ?? identifier
+            ?? nameSelector
+            ?? ariaSelector
+
+        // A row with neither a tag nor any addressable handle is noise — drop it.
+        let tag = element.tag?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (tag?.isEmpty == false) || stableSelector != nil else { return "" }
+
+        var parts: [String] = []
+        parts.append("- \(tag ?? "node")")
+        if let stableSelector { parts.append("selector=\(stableSelector)") }
+
+        for key in ["id", "name", "aria-label", "type", "placeholder", "role"] {
+            if let raw = attributes[key], !raw.isEmpty {
+                parts.append("\(key)=\"\(truncate(raw, to: 40))\"")
+            }
+        }
+
+        if let text = element.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            parts.append("text=\"\(truncate(text, to: 40))\"")
+        }
+
+        return parts.joined(separator: " ")
+    }
+
     // MARK: - Action execution
 
     /// Dispatches a validated driver action to the cua-driver client. Only the
@@ -440,6 +645,56 @@ final class MonkeyAgentLoop: ObservableObject {
     private func execute(action: MonkeyAction, on window: CuaWindow) async throws {
         switch action.action {
         case .click:
+            // GUARDED browser/DOM path: only when the model supplied a
+            // css_selector AND this run's browser grounding is active. Any failure
+            // here is recovered in-place (deactivate + note + fall back) and is
+            // NEVER allowed to throw out of execute — that would end the run. The
+            // element_index / (x,y) AX paths below are completely unchanged.
+            if let cssSelector = action.cssSelector,
+               !cssSelector.isEmpty,
+               browserGroundingActive {
+                do {
+                    try await cuaDriverClient.pageClickElement(
+                        pid: window.pid,
+                        windowId: window.windowId,
+                        selector: cssSelector
+                    )
+                    pendingStepNote = "clicked via page tool (css_selector \(cssSelector))"
+                    return
+                } catch {
+                    // Page tool just became unusable for this run. Disable it,
+                    // note the fallback, and recover WITHOUT throwing.
+                    browserGroundingActive = false
+                    if let elementIndex = action.elementIndex {
+                        // The model also gave an AX target — use it now.
+                        try await cuaDriverClient.click(
+                            pid: window.pid,
+                            windowId: window.windowId,
+                            elementIndex: elementIndex,
+                            x: nil,
+                            y: nil
+                        )
+                        pendingStepNote = "css_selector click failed (\(Self.describe(error))); fell back to AX element_index \(elementIndex)"
+                    } else if let pointX = action.x, let pointY = action.y {
+                        try await cuaDriverClient.click(
+                            pid: window.pid,
+                            windowId: window.windowId,
+                            elementIndex: nil,
+                            x: pointX,
+                            y: pointY
+                        )
+                        pendingStepNote = "css_selector click failed (\(Self.describe(error))); fell back to AX coordinate click"
+                    } else {
+                        // No AX target this turn: recover by re-observing (the
+                        // loop does this unconditionally) so the NEXT turn can use
+                        // a fresh element_index. Do not throw.
+                        pendingStepNote = "css_selector click failed (\(Self.describe(error))); browser grounding disabled, re-observing for AX element_index next turn"
+                    }
+                    return
+                }
+            }
+
+            // AX `element_index` / (x,y) path — IDENTICAL to v0.2.0.
             try await cuaDriverClient.click(
                 pid: window.pid,
                 windowId: window.windowId,
@@ -495,14 +750,28 @@ final class MonkeyAgentLoop: ObservableObject {
 
     // MARK: - Termination helpers
 
-    private func finishDone(summary: String, recorder: MonkeyTraceRecorder) {
+    /// Feature 3b — best-effort stop of the optional cua trajectory recording.
+    /// Called from EVERY terminal path (done / stop / limit / failure / ask_user).
+    /// Only issues a stop when this run actually attempted to start recording, so
+    /// we never reach into a recording another client may own. The driver
+    /// documents `stop_recording` as a no-op when nothing is recording; the `try?`
+    /// additionally swallows any throw so a stop failure is non-fatal.
+    private func stopCuaRecordingBestEffort() async {
+        guard cuaRecordingAttempted else { return }
+        cuaRecordingAttempted = false
+        try? await cuaDriverClient.stopRecording()
+    }
+
+    private func finishDone(summary: String, recorder: MonkeyTraceRecorder) async {
+        await stopCuaRecordingBestEffort()
         recorder.finalize(summary: summary)
         state.isRunning = false
         state.statusLine = "done"
         state.lastActionSummary = summary
     }
 
-    private func finishStopped(recorder: MonkeyTraceRecorder) {
+    private func finishStopped(recorder: MonkeyTraceRecorder) async {
+        await stopCuaRecordingBestEffort()
         let summary = "Stopped by user after \(state.stepNumber) step(s)."
         recorder.finalize(summary: summary)
         state.isRunning = false
@@ -510,7 +779,8 @@ final class MonkeyAgentLoop: ObservableObject {
         state.lastActionSummary = summary
     }
 
-    private func finishStepLimit(recorder: MonkeyTraceRecorder) {
+    private func finishStepLimit(recorder: MonkeyTraceRecorder) async {
+        await stopCuaRecordingBestEffort()
         let summary = "Reached the step limit of \(maximumStepCount) without completing the task."
         recorder.finalize(summary: summary)
         state.isRunning = false
@@ -520,7 +790,8 @@ final class MonkeyAgentLoop: ObservableObject {
         // failureMessage nil keeps the HUD from showing red "failed" styling.
     }
 
-    private func finishWithFailure(_ message: String, recorder: MonkeyTraceRecorder) {
+    private func finishWithFailure(_ message: String, recorder: MonkeyTraceRecorder) async {
+        await stopCuaRecordingBestEffort()
         recorder.finalize(summary: "Failure: \(message)")
         state.isRunning = false
         state.statusLine = "failed"
@@ -528,7 +799,8 @@ final class MonkeyAgentLoop: ObservableObject {
         state.failureMessage = message
     }
 
-    private func surfaceUserQuestion(_ question: String, recorder: MonkeyTraceRecorder) {
+    private func surfaceUserQuestion(_ question: String, recorder: MonkeyTraceRecorder) async {
+        await stopCuaRecordingBestEffort()
         recorder.finalize(summary: "Paused to ask the user: \(question)")
         state.isRunning = false
         state.statusLine = "waiting for user"

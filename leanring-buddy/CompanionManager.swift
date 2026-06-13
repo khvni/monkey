@@ -137,6 +137,15 @@ final class CompanionManager: ObservableObject {
         return MonkeyAgentLoop(cua: cuaDriverClient, runtime: claudeAgentRuntime)
     }()
 
+    /// Feature 3a — re-runs a previously saved Monkeybot workflow by replaying its
+    /// TASK (not its recorded low-level actions) through the live loop. Lazy and
+    /// nil when the loop is absent (cua-driver not installed). Owned here so the
+    /// HUD can trigger "re-run last saved workflow" through `rerunLastSavedRun()`.
+    private(set) lazy var monkeyReplayer: MonkeyReplayer? = {
+        guard let monkeyAgentLoop else { return nil }
+        return MonkeyReplayer(loop: monkeyAgentLoop)
+    }()
+
     // MARK: - Hands-free dictation state
 
     /// True while continuous hands-free dictation is active (toggled by
@@ -760,6 +769,60 @@ final class CompanionManager: ObservableObject {
             await previousResponseTask?.value
             guard !Task.isCancelled else { return }
             await monkeyAgentLoop.run(task: transcript, voiceTranscript: transcript)
+            guard let self, !Task.isCancelled else { return }
+            self.voiceState = .idle
+        }
+    }
+
+    // MARK: - Monkeybot Re-run (Feature 3c)
+
+    /// Whether a saved Monkeybot run exists to re-run. Drives the HUD's
+    /// "Re-run last saved workflow" button enablement. A pure, cheap filesystem
+    /// read — safe to call on the main actor when the HUD is (re)built.
+    var hasSavedRunToRerun: Bool {
+        MonkeyReplayer.mostRecentSavedRun() != nil
+    }
+
+    /// All saved Monkeybot run directories, newest first. Exposed for the UI to
+    /// list / pick saved workflows. Best-effort: returns `[]` when none exist.
+    func listSavedRuns() -> [URL] {
+        MonkeyReplayer.listSavedRuns()
+    }
+
+    /// Feature 3c entry point — re-runs the most recently saved Monkeybot
+    /// workflow by replaying its saved TASK through the live loop (the honest
+    /// "run again": the loop re-decides every action against fresh snapshots).
+    ///
+    /// Reuses the EXACT same `currentResponseTask` cancellation pattern as the
+    /// voice path (`routeTranscriptToMonkeyAgentLoop`): cooperatively stop any
+    /// in-flight run, await its unwind, then start the re-run — so a re-run
+    /// interrupts a prior run cleanly and two `run()` invocations never interleave
+    /// on the loop's shared state. No-op when cua-driver is absent or there is no
+    /// saved run to re-run.
+    func rerunLastSavedRun() {
+        guard let monkeyAgentLoop, let monkeyReplayer else {
+            // cua-driver is not installed — refresh the preflight for the panel
+            // rather than silently doing nothing.
+            print("🐵 Re-run requested but cua-driver / agent loop is unavailable.")
+            refreshCuaPreflight()
+            return
+        }
+        guard let runDirectory = MonkeyReplayer.mostRecentSavedRun() else {
+            print("🐵 Re-run requested but there is no saved run to re-run.")
+            return
+        }
+
+        // Mirror the voice path's interruption handling exactly.
+        monkeyAgentLoop.stop()
+        let previousResponseTask = currentResponseTask
+        previousResponseTask?.cancel()
+
+        voiceState = .processing
+
+        currentResponseTask = Task { [weak self] in
+            await previousResponseTask?.value
+            guard !Task.isCancelled else { return }
+            await monkeyReplayer.rerun(runDirectory: runDirectory)
             guard let self, !Task.isCancelled else { return }
             self.voiceState = .idle
         }

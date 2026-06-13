@@ -342,6 +342,10 @@ final class MenuBarPanelManager: NSObject {
             MonkeybotHUDView(
                 loop: monkeyAgentLoop,
                 isHandsFreeListening: companionManager.isHandsFreeModeActive,
+                canRerunLastSavedRun: companionManager.hasSavedRunToRerun,
+                onRerunLastSavedRun: { [weak companionManager] in
+                    companionManager?.rerunLastSavedRun()
+                },
                 onClose: { NotificationCenter.default.post(name: .monkeybotDismissHUD, object: nil) }
             )
             .frame(width: monkeybotHUDPanelWidth)
@@ -385,6 +389,10 @@ final class MenuBarPanelManager: NSObject {
             MonkeybotHUDView(
                 loop: monkeyAgentLoop,
                 isHandsFreeListening: companionManager.isHandsFreeModeActive,
+                canRerunLastSavedRun: companionManager.hasSavedRunToRerun,
+                onRerunLastSavedRun: { [weak companionManager] in
+                    companionManager?.rerunLastSavedRun()
+                },
                 onClose: { NotificationCenter.default.post(name: .monkeybotDismissHUD, object: nil) }
             )
             .frame(width: monkeybotHUDPanelWidth)

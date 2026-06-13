@@ -39,6 +39,17 @@ struct MonkeybotHUDView: View {
     /// by the integration layer from `CompanionManager.isHandsFreeModeActive`.
     var isHandsFreeListening: Bool = false
 
+    /// Feature 3c — whether a saved Monkeybot run exists to re-run. Supplied by
+    /// the integration layer from `CompanionManager.hasSavedRunToRerun`. When
+    /// false (or no `onRerunLastSavedRun` handler is given) the re-run control is
+    /// hidden, so the HUD looks identical to before on a fresh install.
+    var canRerunLastSavedRun: Bool = false
+
+    /// Feature 3c — invoked when the user taps "Re-run last saved workflow".
+    /// Supplied by the integration layer to call
+    /// `CompanionManager.rerunLastSavedRun()`. Nil hides the control entirely.
+    var onRerunLastSavedRun: (() -> Void)? = nil
+
     /// Optional close handler for the panel chrome's dismiss button. When nil the
     /// close button is hidden.
     var onClose: (() -> Void)? = nil
@@ -48,6 +59,7 @@ struct MonkeybotHUDView: View {
             header
             divider
             detailRows
+            rerunRow
             divider
             footer
         }
@@ -57,6 +69,53 @@ struct MonkeybotHUDView: View {
         .background(panelBackground)
         .animation(.easeInOut(duration: DS.Animation.normal), value: loop.state.isRunning)
         .animation(.easeInOut(duration: DS.Animation.normal), value: isHandsFreeListening)
+        .animation(.easeInOut(duration: DS.Animation.normal), value: canRerunLastSavedRun)
+    }
+
+    // MARK: - Re-run last saved workflow (Feature 3c)
+
+    /// Whether the "Re-run last saved workflow" control should be shown at all:
+    /// only when the integration layer supplied a handler AND a saved run exists.
+    /// Absent both, the HUD renders exactly as it did before this feature.
+    private var showsRerunControl: Bool {
+        onRerunLastSavedRun != nil && canRerunLastSavedRun
+    }
+
+    /// A full-width, low-emphasis button that re-runs the most recent saved
+    /// Monkeybot workflow. Hidden when no saved run exists or no handler is given;
+    /// disabled (dimmed) while a run is already in progress so it never fights the
+    /// live loop. Built with DS tokens + a pointer cursor, matching the HUD's
+    /// compact detail-card treatment rather than the larger DS button styles.
+    @ViewBuilder
+    private var rerunRow: some View {
+        if showsRerunControl {
+            Button(action: { onRerunLastSavedRun?() }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Re-run last saved workflow")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 0)
+                }
+                .foregroundColor(loop.state.isRunning ? DS.Colors.textTertiary : DS.Colors.accentText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, DS.Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                        .fill(DS.Colors.surface2)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                        .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+            .pointerCursor(isEnabled: !loop.state.isRunning)
+            .disabled(loop.state.isRunning)
+            .opacity(loop.state.isRunning ? 0.5 : 1.0)
+            .help("Re-run the most recent saved workflow (re-decides each step against the live UI)")
+        }
     }
 
     // MARK: - Header (product name + status pill + close)
