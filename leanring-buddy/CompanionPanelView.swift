@@ -60,6 +60,33 @@ struct CompanionPanelView: View {
 
             if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
                 Spacer()
+                    .frame(height: 12)
+
+                Divider()
+                    .background(DS.Colors.borderSubtle)
+                    .padding(.horizontal, 16)
+
+                Spacer()
+                    .frame(height: 8)
+
+                monkeybotModeToggleRow
+                    .padding(.horizontal, 16)
+
+                if companionManager.monkeybotModeEnabled {
+                    cuaPreflightStatusRow
+                        .padding(.horizontal, 16)
+                }
+
+                Spacer()
+                    .frame(height: 8)
+
+                Divider()
+                    .background(DS.Colors.borderSubtle)
+                    .padding(.horizontal, 16)
+            }
+
+            if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
+                Spacer()
                     .frame(height: 16)
 
                 dmFarzaButton
@@ -572,6 +599,84 @@ struct CompanionPanelView: View {
             .scaleEffect(0.8)
         }
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Monkeybot Mode Toggle + cua Preflight
+
+    private var monkeybotModeToggleRow: some View {
+        HStack {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Monkeybot Mode")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+                    Text("Drive Chrome by voice (Control+Option+Space for hands-free)")
+                        .font(.system(size: 10))
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer()
+
+            Toggle("", isOn: Binding(
+                get: { companionManager.monkeybotModeEnabled },
+                set: { companionManager.monkeybotModeEnabled = $0 }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .tint(DS.Colors.accent)
+            .scaleEffect(0.8)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var cuaPreflightStatusRow: some View {
+        HStack {
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(width: 16)
+
+                Text("cua-driver")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(cuaPreflightStatusColor)
+                    .frame(width: 6, height: 6)
+                Text(companionManager.cuaPreflight?.permissionStatus ?? "unknown")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(cuaPreflightStatusColor)
+            }
+        }
+        .padding(.vertical, 4)
+        .onAppear {
+            // Refresh the readiness snapshot when the row first appears so the
+            // status reflects current daemon/permission state.
+            companionManager.refreshCuaPreflight()
+        }
+    }
+
+    private var cuaPreflightStatusColor: Color {
+        switch companionManager.cuaPreflight?.permissionStatus {
+        case "granted":
+            return DS.Colors.success
+        case "denied":
+            return DS.Colors.destructive
+        default:
+            return DS.Colors.warning
+        }
     }
 
     private var speechToTextProviderRow: some View {

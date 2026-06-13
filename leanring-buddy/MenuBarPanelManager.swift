@@ -12,10 +12,13 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
 extension Notification.Name {
     static let clickyDismissPanel = Notification.Name("clickyDismissPanel")
+    /// Posted to explicitly hide the Monkeybot HUD (e.g. its close button).
+    static let monkeybotDismissHUD = Notification.Name("monkeybotDismissHUD")
 }
 
 /// Custom NSPanel subclass that can become the key window even with
@@ -35,6 +38,15 @@ final class MenuBarPanelManager: NSObject {
     private let panelWidth: CGFloat = 320
     private let panelHeight: CGFloat = 380
 
+    // MARK: - Monkeybot HUD
+
+    /// Floating HUD panel for the Monkeybot agent run. Persistent for the
+    /// duration of a run; NOT dismissed on outside click (unlike the menu panel).
+    private var monkeybotHUDPanel: NSPanel?
+    private let monkeybotHUDPanelWidth: CGFloat = 320
+    private var monkeybotHUDCancellables: Set<AnyCancellable> = []
+    private var monkeybotDismissHUDObserver: NSObjectProtocol?
+
     init(companionManager: CompanionManager) {
         self.companionManager = companionManager
         super.init()
@@ -47,6 +59,16 @@ final class MenuBarPanelManager: NSObject {
         ) { [weak self] _ in
             self?.hidePanel()
         }
+
+        monkeybotDismissHUDObserver = NotificationCenter.default.addObserver(
+            forName: .monkeybotDismissHUD,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.hideMonkeybotHUD()
+        }
+
+        observeMonkeybotState()
     }
 
     deinit {
@@ -54,6 +76,9 @@ final class MenuBarPanelManager: NSObject {
             NSEvent.removeMonitor(monitor)
         }
         if let observer = dismissPanelObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = monkeybotDismissHUDObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -239,5 +264,171 @@ final class MenuBarPanelManager: NSObject {
             NSEvent.removeMonitor(monitor)
             clickOutsideMonitor = nil
         }
+    }
+
+    // MARK: - Monkeybot HUD Lifecycle
+
+    /// True once the loop-state subscription has been wired. Avoids touching the
+    /// lazy `monkeyAgentLoop` (and its cua-driver binary search) until Monkeybot
+    /// mode is actually enabled.
+    private var hasWiredMonkeybotLoopObservation = false
+
+    /// Wires HUD observation deferred to first Monkeybot-mode enable. We watch
+    /// only the lightweight `monkeybotModeEnabled` flag at launch; the heavier
+    /// loop-state subscription (which forces the lazy loop + binary search) is
+    /// installed the first time Monkeybot is turned on.
+    private func observeMonkeybotState() {
+        // Hands-free listening is independent of cua-driver and cheap to observe,
+        // so subscribe to it eagerly to surface the HUD's "Listening" state.
+        companionManager.$isHandsFreeModeActive
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isListening in
+                guard let self else { return }
+                // Only surface the HUD for hands-free when Monkeybot mode is on,
+                // so a plain-dictation user never triggers the lazy loop / binary
+                // search and never sees an agent HUD they didn't ask for.
+                guard self.companionManager.monkeybotModeEnabled else { return }
+                self.refreshMonkeybotHUDContent()
+                if isListening {
+                    self.showMonkeybotHUD()
+                } else if !self.isMonkeybotLoopRunning {
+                    self.scheduleMonkeybotHUDHideIfIdle()
+                }
+            }
+            .store(in: &monkeybotHUDCancellables)
+
+        // Install the loop-state subscription only once Monkeybot is enabled.
+        companionManager.$monkeybotModeEnabled
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self, enabled else { return }
+                self.wireMonkeybotLoopObservationIfNeeded()
+            }
+            .store(in: &monkeybotHUDCancellables)
+    }
+
+    /// Subscribes to the agent loop's running state so the HUD auto-shows on a
+    /// run and auto-hides when idle. Idempotent and lazy — only forces the loop
+    /// when Monkeybot mode has been enabled.
+    private func wireMonkeybotLoopObservationIfNeeded() {
+        guard !hasWiredMonkeybotLoopObservation else { return }
+        guard let monkeyAgentLoop = companionManager.monkeyAgentLoop else { return }
+        hasWiredMonkeybotLoopObservation = true
+
+        monkeyAgentLoop.$state
+            .map(\.isRunning)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRunning in
+                guard let self else { return }
+                if isRunning {
+                    self.showMonkeybotHUD()
+                } else if !self.companionManager.isHandsFreeModeActive {
+                    self.scheduleMonkeybotHUDHideIfIdle()
+                }
+            }
+            .store(in: &monkeybotHUDCancellables)
+    }
+
+    /// Rebuilds the HUD's SwiftUI root so the (non-bound) `isHandsFreeListening`
+    /// value reflects the latest CompanionManager state. The agent loop's state
+    /// is observed reactively, so only the hands-free flag needs this nudge.
+    private func refreshMonkeybotHUDContent() {
+        guard let hudPanel = monkeybotHUDPanel,
+              let hostingView = hudPanel.contentView as? NSHostingView<AnyView>,
+              let monkeyAgentLoop = companionManager.monkeyAgentLoop else { return }
+        hostingView.rootView = AnyView(
+            MonkeybotHUDView(
+                loop: monkeyAgentLoop,
+                isHandsFreeListening: companionManager.isHandsFreeModeActive,
+                onClose: { NotificationCenter.default.post(name: .monkeybotDismissHUD, object: nil) }
+            )
+            .frame(width: monkeybotHUDPanelWidth)
+        )
+    }
+
+    /// Whether the agent loop is currently running, WITHOUT forcing the lazy
+    /// loop to be constructed. Returns false until the loop observation is wired.
+    private var isMonkeybotLoopRunning: Bool {
+        guard hasWiredMonkeybotLoopObservation else { return false }
+        return companionManager.monkeyAgentLoop?.state.isRunning ?? false
+    }
+
+    /// Hides the HUD after a short grace period if nothing is running/listening.
+    private func scheduleMonkeybotHUDHideIfIdle() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+            guard let self else { return }
+            guard !self.isMonkeybotLoopRunning, !self.companionManager.isHandsFreeModeActive else { return }
+            self.hideMonkeybotHUD()
+        }
+    }
+
+    private func showMonkeybotHUD() {
+        guard companionManager.monkeyAgentLoop != nil else { return }
+        if monkeybotHUDPanel == nil {
+            createMonkeybotHUDPanel()
+        }
+        positionMonkeybotHUD()
+        monkeybotHUDPanel?.makeKeyAndOrderFront(nil)
+        monkeybotHUDPanel?.orderFrontRegardless()
+    }
+
+    private func hideMonkeybotHUD() {
+        monkeybotHUDPanel?.orderOut(nil)
+    }
+
+    private func createMonkeybotHUDPanel() {
+        guard let monkeyAgentLoop = companionManager.monkeyAgentLoop else { return }
+
+        let hudView = AnyView(
+            MonkeybotHUDView(
+                loop: monkeyAgentLoop,
+                isHandsFreeListening: companionManager.isHandsFreeModeActive,
+                onClose: { NotificationCenter.default.post(name: .monkeybotDismissHUD, object: nil) }
+            )
+            .frame(width: monkeybotHUDPanelWidth)
+        )
+
+        let hostingView = NSHostingView<AnyView>(rootView: hudView)
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = .clear
+
+        // Reuse the same NSPanel pattern as the menu bar panel (KeyablePanel).
+        let hudPanel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: monkeybotHUDPanelWidth, height: 200),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        hudPanel.isFloatingPanel = true
+        hudPanel.level = .floating
+        hudPanel.isOpaque = false
+        hudPanel.backgroundColor = .clear
+        hudPanel.hasShadow = false
+        hudPanel.hidesOnDeactivate = false
+        hudPanel.isExcludedFromWindowsMenu = true
+        hudPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // Let the user drag the HUD out of the way during a run.
+        hudPanel.isMovableByWindowBackground = true
+        hudPanel.titleVisibility = .hidden
+        hudPanel.titlebarAppearsTransparent = true
+        hudPanel.contentView = hostingView
+        monkeybotHUDPanel = hudPanel
+    }
+
+    /// Positions the HUD in the bottom-right of the main screen's visible frame.
+    /// Uses fittingSize so the height tracks the SwiftUI content.
+    private func positionMonkeybotHUD() {
+        guard let hudPanel = monkeybotHUDPanel else { return }
+        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let fittingSize = hudPanel.contentView?.fittingSize
+            ?? CGSize(width: monkeybotHUDPanelWidth, height: 260)
+        let originX = screen.maxX - monkeybotHUDPanelWidth - 16
+        let originY = screen.minY + 16
+        hudPanel.setFrame(
+            NSRect(x: originX, y: originY, width: monkeybotHUDPanelWidth, height: fittingSize.height),
+            display: true
+        )
     }
 }

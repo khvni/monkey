@@ -97,6 +97,61 @@ final class CompanionManager: ObservableObject {
     /// speaks again before the delay elapses.
     private var transientHideTask: Task<Void, Never>?
 
+    // MARK: - Monkeybot (agentic computer-use) integration
+
+    /// When true, a finalized push-to-talk transcript is routed into the
+    /// Monkeybot agent loop instead of the existing Clicky pointing pipeline.
+    /// Persisted to UserDefaults so the choice survives app restarts.
+    @Published var monkeybotModeEnabled: Bool = UserDefaults.standard.bool(forKey: "monkeybotModeEnabled") {
+        didSet {
+            UserDefaults.standard.set(monkeybotModeEnabled, forKey: "monkeybotModeEnabled")
+            // Lazily run a preflight the first time the user enables Monkeybot so
+            // the panel's cua-driver status row has something to show.
+            if monkeybotModeEnabled && cuaPreflight == nil {
+                refreshCuaPreflight()
+            }
+        }
+    }
+
+    /// Latest cua-driver readiness snapshot, surfaced in the panel's status row.
+    /// Nil until the first preflight runs (on first Monkeybot-mode enable).
+    @Published private(set) var cuaPreflight: CuaPreflight?
+
+    /// The cua-driver CLI wrapper, created lazily so the binary search only
+    /// happens once Monkeybot is actually used. Nil when cua-driver is absent.
+    private lazy var cuaDriverClient: CuaDriverClient? = {
+        guard let binaryPath = CuaDriverClient.locateBinary() else { return nil }
+        return CuaDriverClient(binaryPath: binaryPath)
+    }()
+
+    /// The agent brain, reusing the EXISTING claudeAPI instance (no second
+    /// Cloudflare connection, no auth change).
+    private lazy var claudeAgentRuntime: ClaudeAgentRuntime = {
+        ClaudeAgentRuntime(claudeApi: claudeAPI)
+    }()
+
+    /// The observe-act-verify loop. Nil when cua-driver is not installed.
+    /// The HUD binds to this loop's published state.
+    private(set) lazy var monkeyAgentLoop: MonkeyAgentLoop? = {
+        guard let cuaDriverClient else { return nil }
+        return MonkeyAgentLoop(cua: cuaDriverClient, runtime: claudeAgentRuntime)
+    }()
+
+    // MARK: - Hands-free dictation state
+
+    /// True while continuous hands-free dictation is active (toggled by
+    /// Ctrl+Option+Space). Distinguished from normal hold-to-talk so the HUD /
+    /// menu bar can show a "Listening (hands-free)" state.
+    @Published private(set) var isHandsFreeModeActive: Bool = false
+
+    /// Subscription to the hands-free toggle publisher. Stored separately from
+    /// shortcutTransitionCancellable and torn down in the same stop() path.
+    private var handsFreeToggleCancellable: AnyCancellable?
+
+    /// The async task that starts a hands-free dictation session. Kept separate
+    /// from pendingKeyboardShortcutStartTask so the two paths never collide.
+    private var handsFreeStartTask: Task<Void, Never>?
+
     /// True when all three required permissions (accessibility, screen recording,
     /// microphone) are granted. Used by the panel to show a single "all good" state.
     var allPermissionsGranted: Bool {
@@ -295,7 +350,12 @@ final class CompanionManager: ObservableObject {
 
         currentResponseTask?.cancel()
         currentResponseTask = nil
+        monkeyAgentLoop?.stop()
+        handsFreeStartTask?.cancel()
+        handsFreeStartTask = nil
+        isHandsFreeModeActive = false
         shortcutTransitionCancellable?.cancel()
+        handsFreeToggleCancellable?.cancel()
         voiceStateCancellable?.cancel()
         audioPowerCancellable?.cancel()
         accessibilityCheckTimer?.invalidate()
@@ -468,11 +528,94 @@ final class CompanionManager: ObservableObject {
             .sink { [weak self] transition in
                 self?.handleShortcutTransition(transition)
             }
+
+        // Second subscription: Ctrl+Option+Space toggles continuous hands-free
+        // recording. Kept on its own cancellable so the hold-to-talk path above
+        // is completely undisturbed.
+        handsFreeToggleCancellable = globalPushToTalkShortcutMonitor
+            .handsFreeTogglePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                self?.handleHandsFreeToggle()
+            }
+    }
+
+    /// Handles the Ctrl+Option+Space toggle. When hands-free is OFF, starts a
+    /// continuous dictation session that auto-submits on stop; when ON, stops
+    /// it (which finalizes and submits the transcript).
+    private func handleHandsFreeToggle() {
+        if isHandsFreeModeActive {
+            // Toggle OFF — finalize and submit the continuous session.
+            isHandsFreeModeActive = false
+            handsFreeStartTask?.cancel()
+            handsFreeStartTask = nil
+            buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
+            return
+        }
+
+        // Toggle ON — guard against a double-start and onboarding playback.
+        guard !buddyDictationManager.isDictationInProgress else { return }
+        guard !showOnboardingVideo else { return }
+
+        // Cancel any pending transient hide and ensure the cursor is visible,
+        // matching the hold-to-talk start behavior.
+        transientHideTask?.cancel()
+        transientHideTask = nil
+        if !isClickyCursorEnabled && !isOverlayVisible {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+        NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
+
+        // Stop any in-flight response/agent run and clear prior pointing.
+        currentResponseTask?.cancel()
+        monkeyAgentLoop?.stop()
+        elevenLabsTTSClient.stopPlayback()
+        clearDetectedElementLocation()
+
+        ClickyAnalytics.trackPushToTalkStarted()
+
+        isHandsFreeModeActive = true
+        handsFreeStartTask?.cancel()
+        handsFreeStartTask = Task { [weak self] in
+            guard let self else { return }
+            // Empty currentDraftText → BuddyDictationManager sets
+            // shouldAutomaticallySubmitFinalDraftOnStop = true, so stopping the
+            // session delivers the final transcript through submitDraftText.
+            await self.buddyDictationManager.startPushToTalkFromKeyboardShortcut(
+                currentDraftText: "",
+                updateDraftText: { _ in },
+                submitDraftText: { [weak self] finalTranscript in
+                    guard let self else { return }
+                    self.isHandsFreeModeActive = false
+                    self.handsFreeStartTask = nil
+                    self.lastTranscript = finalTranscript
+                    print("🗣️ Hands-free transcript: \(finalTranscript)")
+                    ClickyAnalytics.trackUserMessageSent(transcript: finalTranscript)
+                    self.sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
+                }
+            )
+        }
     }
 
     private func handleShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {
         switch transition {
         case .pressed:
+            // Hands-free ON: a Ctrl+Option press STOPS the continuous session
+            // and submits, instead of starting a new hold-to-talk session.
+            // Setting isHandsFreeModeActive = false here makes the trailing
+            // .released event a no-op (guarded below).
+            if isHandsFreeModeActive {
+                isHandsFreeModeActive = false
+                handsFreeStartTask?.cancel()
+                handsFreeStartTask = nil
+                pendingKeyboardShortcutStartTask?.cancel()
+                pendingKeyboardShortcutStartTask = nil
+                buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
+                return
+            }
+
             guard !buddyDictationManager.isDictationInProgress else { return }
             // Don't register push-to-talk while the onboarding video is playing
             guard !showOnboardingVideo else { return }
@@ -526,6 +669,12 @@ final class CompanionManager: ObservableObject {
                 )
             }
         case .released:
+            // While hands-free is active, the Ctrl+Option modifier-up that
+            // follows a hands-free-stopping press (item C) must NOT trigger a
+            // second stop. The press handler already cleared the flag, so this
+            // guard catches the trailing release. (BuddyDictationManager's stop
+            // is also idempotent via its isFinalizingTranscript guard.)
+            guard !isHandsFreeModeActive else { return }
             // Cancel the pending start task in case the user released the shortcut
             // before the async startPushToTalk had a chance to begin recording.
             // Without this, a quick press-and-release drops the release event and
@@ -576,6 +725,64 @@ final class CompanionManager: ObservableObject {
     - element is on screen 2 (not where cursor is): "that's over on your other monitor — see the terminal window? [POINT:400,300:terminal:screen2]"
     """
 
+    // MARK: - Monkeybot Routing
+
+    /// Routes a finalized transcript into the Monkeybot agent loop instead of
+    /// the Clicky pointing pipeline. Wraps the run in `currentResponseTask` so
+    /// the existing `.pressed` cancellation (handleShortcutTransition) stops an
+    /// in-flight agent run when the user speaks again — mirroring how a Clicky
+    /// response is cancelled. The loop's `stop()` is called cooperatively first
+    /// because the cua-driver subprocess will not auto-terminate on task cancel.
+    private func routeTranscriptToMonkeyAgentLoop(transcript: String) {
+        guard let monkeyAgentLoop else {
+            // cua-driver is not installed — surface a spoken hint rather than
+            // silently doing nothing, and refresh the preflight for the panel.
+            print("🐵 Monkeybot mode is on but cua-driver was not found.")
+            refreshCuaPreflight()
+            return
+        }
+
+        // Cooperatively stop any prior run (the cua-driver subprocess will not
+        // auto-terminate on Swift task cancellation), capture its task so the
+        // new run can await its completion before starting — this prevents two
+        // run() invocations interleaving on the loop's shared state.
+        monkeyAgentLoop.stop()
+        let previousResponseTask = currentResponseTask
+        previousResponseTask?.cancel()
+
+        // Keep the cursor coherent while the agent works: processing on start,
+        // idle when the run ends (success, stop, limit, or failure).
+        voiceState = .processing
+
+        currentResponseTask = Task { [weak self] in
+            // Let any prior run unwind fully so the loop's state/stopRequested
+            // are not mutated by two concurrent runs.
+            await previousResponseTask?.value
+            guard !Task.isCancelled else { return }
+            await monkeyAgentLoop.run(task: transcript, voiceTranscript: transcript)
+            guard let self, !Task.isCancelled else { return }
+            self.voiceState = .idle
+        }
+    }
+
+    /// Runs a cua-driver preflight and publishes the result for the panel's
+    /// status row. Safe to call repeatedly; no-op (unknown) when cua is absent.
+    func refreshCuaPreflight() {
+        guard let cuaDriverClient else {
+            cuaPreflight = CuaPreflight(
+                binaryPath: nil,
+                daemonRunning: false,
+                permissionStatus: "unknown",
+                detail: "cua-driver not installed. Install CuaDriver to use Monkeybot mode."
+            )
+            return
+        }
+        Task { [weak self] in
+            let preflight = await cuaDriverClient.preflight()
+            self?.cuaPreflight = preflight
+        }
+    }
+
     // MARK: - AI Response Pipeline
 
     /// Captures a screenshot, sends it along with the transcript to Claude,
@@ -584,6 +791,16 @@ final class CompanionManager: ObservableObject {
     /// Claude's response may include a [POINT:x,y:label] tag which triggers
     /// the buddy to fly to that element on screen.
     private func sendTranscriptToClaudeWithScreenshot(transcript: String) {
+        // ── Monkeybot mode branch ──────────────────────────────────────────
+        // Must be the FIRST statement so the existing Clicky cancellation /
+        // TTS-stop below never runs (and never races the new agent task) when
+        // Monkeybot is driving. Everything beneath is the untouched Clicky path.
+        if monkeybotModeEnabled {
+            routeTranscriptToMonkeyAgentLoop(transcript: transcript)
+            return
+        }
+        // ── END Monkeybot branch ───────────────────────────────────────────
+
         currentResponseTask?.cancel()
         elevenLabsTTSClient.stopPlayback()
 

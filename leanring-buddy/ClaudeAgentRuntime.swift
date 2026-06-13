@@ -14,7 +14,7 @@ import Foundation
 /// Pluggable agent brain that asks Claude to choose the next single cua action.
 ///
 /// The runtime builds a strict-JSON system prompt documenting the MonkeyAction schema,
-/// supplies the pruned observation markdown plus the most recent screenshot(s) plus a
+/// supplies the length-capped observation markdown plus the most recent screenshot(s) plus a
 /// compact prior-step history, then parses and validates the model's reply. On malformed
 /// JSON it re-prompts exactly once with the bad output and a correction instruction.
 final class ClaudeAgentRuntime: AgentRuntime {
@@ -82,11 +82,19 @@ final class ClaudeAgentRuntime: AgentRuntime {
                 onTextChunk: { _ in }
             )
 
-            // A second failure propagates to the loop (the loop also guards / stops
-            // gracefully). We surface the ORIGINAL parse error context via the thrown error.
-            let action = try MonkeyAction.parse(fromModelText: retryText)
-            try action.validate()
-            return action
+            // Second failure must NOT kill the run. Fall back to a re-observation so
+            // the loop hands the model a fresh snapshot and another chance next turn,
+            // rather than aborting the whole task on one bad pair of replies.
+            do {
+                let action = try MonkeyAction.parse(fromModelText: retryText)
+                try action.validate()
+                return action
+            } catch {
+                return MonkeyAction(
+                    action: .observe,
+                    reason: "Model returned unusable JSON twice; re-observing to recover."
+                )
+            }
         }
     }
 
@@ -151,10 +159,15 @@ final class ClaudeAgentRuntime: AgentRuntime {
         "y" (number).
                            Prefer "element_index" from the CURRENT observation. Use raw \
         "x"/"y" screen coordinates ONLY when no accessibility element matches.
-        - type_text      : type characters into the focused field.
+        - type_text      : type characters into a text field. THIS IS THE DEFAULT for \
+        all free-form text entry, including web/Chrome inputs (Clay cells, search boxes, \
+        forms). cua synthesizes real keystrokes here, which web pages actually receive.
                            Required: "text" (string).
                            Optional: "element_index" (int) to focus a field first.
-        - set_value      : directly set a field's value (faster/cleaner than typing).
+        - set_value      : set a NATIVE control's value directly — popup buttons / <select> \
+        dropdowns, sliders, steppers. Do NOT use set_value for free-form text in web pages: \
+        WebKit/Chrome ignore AXValue writes, so it silently does nothing — use type_text \
+        instead. Reserve set_value for choosing an option in a dropdown/select.
                            Required: "element_index" (int) AND "value" (string).
         - scroll         : scroll within the window or an element.
                            Required: "direction" (one of "up","down","left","right").
@@ -180,7 +193,8 @@ final class ClaudeAgentRuntime: AgentRuntime {
 
         # STRATEGY
         - Emit the single most useful next action toward the task.
-        - Prefer accessibility targeting ("element_index", "set_value") over raw coordinates.
+        - Prefer accessibility targeting ("element_index") over raw coordinates. Use \
+        type_text for text fields; reserve set_value for native dropdowns/selects/sliders.
         - When the goal is achieved, emit a "done" action with a clear "summary".
         - If a required control is missing, ambiguous, or you need a human decision, emit \
         "ask_user" rather than guessing destructively.
@@ -188,15 +202,15 @@ final class ClaudeAgentRuntime: AgentRuntime {
 
         # EXAMPLES (shape only — match the current observation, do not copy indices)
         {"action":"click","element_index":12,"reason":"open the search field"}
-        {"action":"type_text","text":"hello world","reason":"enter the query"}
-        {"action":"set_value","element_index":4,"value":"jane@example.com"}
+        {"action":"type_text","element_index":4,"text":"jane@example.com","reason":"enter email into the web field"}
+        {"action":"set_value","element_index":7,"value":"United States","reason":"choose a native dropdown option"}
         {"action":"hotkey","keys":["cmd","return"],"reason":"submit the form"}
         {"action":"scroll","direction":"down","by":"page","amount":1}
         {"action":"done","summary":"Submitted the contact form successfully."}
         """
     }
 
-    /// User prompt: voice transcript (verbatim intent), the pruned observation markdown,
+    /// User prompt: voice transcript (verbatim intent), the length-capped observation markdown,
     /// and a compact prior-step history. Screenshots travel as separate image blocks.
     private static func buildUserPrompt(context: AgentContext) -> String {
         var sections: [String] = []

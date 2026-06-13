@@ -546,49 +546,115 @@ final class CuaDriverClient {
     /// Launch the resolved `cua-driver` binary with the given arguments and wait
     /// for it to exit, capturing stdout/stderr. Runs the blocking `Process` work
     /// off the main actor so the UI stays responsive.
-    private func runProcess(arguments: [String]) async throws -> ProcessResult {
+    ///
+    /// Robustness (all three matter for the agent loop + Stop button):
+    ///  - Both pipes are drained on SEPARATE threads concurrently with
+    ///    waitUntilExit(). Reading them sequentially deadlocks once the child
+    ///    fills one OS pipe buffer (~64KB) — cua emits large AX trees on stdout
+    ///    and verbose WARN logs on stderr, so this is a real hazard.
+    ///  - Task cancellation (user Stop) terminates the running subprocess.
+    ///  - A timeout watchdog terminates a wedged call (e.g. a daemon stuck on a
+    ///    TCC prompt) so the loop never hangs forever.
+    private func runProcess(arguments: [String], timeout: TimeInterval = 30) async throws -> ProcessResult {
         let executablePath = binaryPath
         guard FileManager.default.isExecutableFile(atPath: executablePath) else {
             throw CuaDriverError.binaryNotFound
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: executablePath)
-                process.arguments = arguments
+        let toolLabel = arguments.count > 1 ? arguments[1] : (arguments.first ?? "cua-driver")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
-                let stdoutPipe = Pipe()
-                let stderrPipe = Pipe()
-                process.standardOutput = stdoutPipe
-                process.standardError = stderrPipe
+        let runGuard = ProcessRunGuard()
 
-                do {
-                    try process.run()
-                } catch {
-                    continuation.resume(
-                        throwing: CuaDriverError.callFailed(
-                            tool: arguments.first ?? "cua-driver",
-                            stderr: "failed to launch cua-driver: \(error.localizedDescription)"
-                        )
-                    )
-                    return
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ProcessResult, Error>) in
+                // Watchdog: terminate + fail if the call outlives the timeout.
+                let timeoutItem = DispatchWorkItem {
+                    if runGuard.launched && process.isRunning { process.terminate() }
+                    if runGuard.claimResume() {
+                        continuation.resume(throwing: CuaDriverError.callFailed(
+                            tool: toolLabel,
+                            stderr: "timed out after \(Int(timeout))s"
+                        ))
+                    }
                 }
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutItem)
 
-                // Read both pipes fully before waiting to avoid a deadlock when
-                // a child fills an OS pipe buffer.
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try process.run()
+                    } catch {
+                        timeoutItem.cancel()
+                        if runGuard.claimResume() {
+                            continuation.resume(throwing: CuaDriverError.callFailed(
+                                tool: toolLabel,
+                                stderr: "failed to launch cua-driver: \(error.localizedDescription)"
+                            ))
+                        }
+                        return
+                    }
+                    runGuard.markLaunched()
 
-                let result = ProcessResult(
-                    exitCode: process.terminationStatus,
-                    stdout: String(decoding: stdoutData, as: UTF8.self),
-                    stderr: String(decoding: stderrData, as: UTF8.self)
-                )
-                continuation.resume(returning: result)
+                    // Drain both pipes on their own threads, concurrently with the
+                    // wait, so a full buffer on either stream can never deadlock.
+                    var stdoutData = Data()
+                    var stderrData = Data()
+                    let drainGroup = DispatchGroup()
+                    drainGroup.enter()
+                    DispatchQueue.global().async {
+                        stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                        drainGroup.leave()
+                    }
+                    drainGroup.enter()
+                    DispatchQueue.global().async {
+                        stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                        drainGroup.leave()
+                    }
+
+                    process.waitUntilExit()
+                    drainGroup.wait()
+                    timeoutItem.cancel()
+
+                    if runGuard.claimResume() {
+                        continuation.resume(returning: ProcessResult(
+                            exitCode: process.terminationStatus,
+                            stdout: String(decoding: stdoutData, as: UTF8.self),
+                            stderr: String(decoding: stderrData, as: UTF8.self)
+                        ))
+                    }
+                }
             }
+        } onCancel: {
+            // User pressed Stop (or the parent Task was cancelled): kill the child.
+            if runGuard.launched && process.isRunning { process.terminate() }
         }
+    }
+}
+
+/// Thread-safe one-shot guard shared by the timeout watchdog, the cancellation
+/// handler, and the normal completion path so the continuation resumes exactly
+/// once and `terminate()` is only called on a launched process.
+private final class ProcessRunGuard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hasResumed = false
+    private var didLaunch = false
+
+    func markLaunched() { lock.lock(); didLaunch = true; lock.unlock() }
+
+    var launched: Bool { lock.lock(); defer { lock.unlock() }; return didLaunch }
+
+    /// Returns true exactly once — the caller that wins may resume the continuation.
+    func claimResume() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if hasResumed { return false }
+        hasResumed = true
+        return true
     }
 }
 

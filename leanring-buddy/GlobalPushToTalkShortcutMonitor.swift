@@ -15,6 +15,12 @@ import Foundation
 final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     let shortcutTransitionPublisher = PassthroughSubject<BuddyPushToTalkShortcut.ShortcutTransition, Never>()
 
+    /// Fires once each time the user presses Ctrl+Option+Space. The subscriber
+    /// (CompanionManager) treats it as a toggle for continuous hands-free
+    /// recording. Kept separate from `shortcutTransitionPublisher` so the
+    /// existing hold-to-talk path is entirely undisturbed.
+    let handsFreeTogglePublisher = PassthroughSubject<Void, Never>()
+
     private var globalEventTap: CFMachPort?
     private var globalEventTapRunLoopSource: CFRunLoopSource?
     /// Mutated exclusively from the CGEvent tap callback, which runs on
@@ -109,6 +115,33 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
         }
 
         let eventKeyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+
+        // Ctrl+Option+Space toggle for hands-free recording. Checked BEFORE the
+        // hold-to-talk transition below and returns early so the modifier-only
+        // (.flagsChanged) path is never reached for this key event. This cannot
+        // collide with hold-to-talk: the active shortcut is .controlOption
+        // (modifier-only), whose matcher returns .none for ALL .keyDown events.
+        // Mask out only the four standard modifier bits so caps-lock / numeric-pad
+        // / fn noise on `event.flags` does not defeat the exact match. We require
+        // Control AND Option present, and Shift AND Command absent — i.e. exactly
+        // Ctrl+Option held while Space goes down.
+        let modifierMask = CGEventFlags(rawValue:
+            CGEventFlags.maskControl.rawValue
+            | CGEventFlags.maskAlternate.rawValue
+            | CGEventFlags.maskShift.rawValue
+            | CGEventFlags.maskCommand.rawValue)
+        let pressedModifiers = event.flags.intersection(modifierMask)
+
+        if eventType == .keyDown,
+           eventKeyCode == BuddyPushToTalkShortcut.pushToTalkKeyCode,
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+           pressedModifiers.rawValue
+               == (CGEventFlags.maskControl.rawValue | CGEventFlags.maskAlternate.rawValue) {
+            // Ignore key autorepeat so holding Space does not rapidly toggle.
+            handsFreeTogglePublisher.send(())
+            return Unmanaged.passUnretained(event)
+        }
+
         let shortcutTransition = BuddyPushToTalkShortcut.shortcutTransition(
             for: eventType,
             keyCode: eventKeyCode,
