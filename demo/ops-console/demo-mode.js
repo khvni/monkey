@@ -42,6 +42,9 @@
   #mb-run{background:linear-gradient(145deg,#6e8bff,#8a6bff);color:#fff}
   #mb-run:hover{filter:brightness(1.08)} #mb-run:disabled{opacity:.5;cursor:default}
   #mb-coach{background:#171c25;color:#5eead4;border:1px solid #2dd4bf!important}
+  #mb-mic{background:#171c25;color:#aab8ff;border:1px solid #2c3644!important}
+  #mb-mic.on{background:#f87171;color:#fff;border-color:#f87171!important;animation:micpulse 1s ease infinite}
+  @keyframes micpulse{0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,.5)}50%{box-shadow:0 0 0 7px rgba(248,113,113,0)}}
   .mb-focus{box-shadow:0 0 0 3px rgba(110,139,255,.5)!important;border-color:#6e8bff!important;transition:box-shadow .15s}
   `;
   const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
@@ -57,7 +60,8 @@
     <input id="mb-task" placeholder="Give Monkeybot a task…" value="Create a deal: Acme Corp annual renewal, $48,000, owner Sam Chen, stage Qualified to buy, close 09/30/2026, type Renewal.">
     <button id="mb-run">Run</button>
     <input id="mb-coachin" placeholder="Coach it (e.g. renewals are always High priority + add a follow-up task)…" style="flex:.9">
-    <button id="mb-coach">Teach</button>`;
+    <button id="mb-coach">Teach</button>
+    <button id="mb-mic" title="Hold to talk — or hold Ctrl+Option">Hold to talk</button>`;
   document.body.appendChild(bar);
 
   let cursorX = -200, cursorY = -200, running = false;
@@ -270,6 +274,32 @@ Rules:
     coaching.push(c); $("#mb-coachin").value = "";
     say(c, true);  // show the coaching as a bubble from "You"
   }
+
+  // ---------- voice: push-to-talk (Web Speech API; needs HTTPS — use the pages.dev URL) ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null, recognizing = false, pttDown = false;
+  function handleVoice(text) {
+    text = (text || "").trim(); if (!text) return;
+    if (running) { coaching.push(text); say(text, true); }   // mid-run → live coaching, adapts next turn
+    else { $("#mb-task").value = text; }                       // idle → fills the task; press Run
+  }
+  function startPTT() {
+    if (!SR || recognizing) return;
+    recog = new SR(); recog.lang = "en-US"; recog.interimResults = false; recog.maxAlternatives = 1;
+    recog.onresult = (e) => handleVoice(e.results[0][0].transcript);
+    recog.onend = () => { recognizing = false; $("#mb-mic")?.classList.remove("on"); };
+    try { recog.start(); recognizing = true; $("#mb-mic")?.classList.add("on"); } catch (_) {}
+  }
+  function stopPTT() { if (recog && recognizing) { try { recog.stop(); } catch (_) {} } }
+  // Hold Ctrl+Option to talk (mirrors the Swift app's push-to-talk) …
+  window.addEventListener("keydown", (e) => { if (e.ctrlKey && e.altKey && !pttDown) { pttDown = true; startPTT(); } });
+  window.addEventListener("keyup", () => { if (pttDown) { pttDown = false; stopPTT(); } });
+  // … or press-and-hold the "Hold to talk" button.
+  const mic = $("#mb-mic");
+  mic.addEventListener("mousedown", (e) => { e.preventDefault(); startPTT(); });
+  mic.addEventListener("mouseup", stopPTT);
+  mic.addEventListener("mouseleave", stopPTT);
+  if (!SR) { mic.disabled = true; mic.textContent = "Voice n/a"; mic.title = "SpeechRecognition needs Chrome over HTTPS (the pages.dev URL)"; }
 
   $("#mb-run").onclick = run;
   $("#mb-coach").onclick = teach;
