@@ -513,7 +513,7 @@ struct CompanionPanelView: View {
                     Text("Monkeybot Mode")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(DS.Colors.textSecondary)
-                    Text("Drive Chrome by voice (Control+Option+Space for hands-free)")
+                    Text("Drive your Mac apps by voice (Control+Option+Space for hands-free)")
                         .font(.system(size: 10))
                         .foregroundColor(DS.Colors.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -530,7 +530,7 @@ struct CompanionPanelView: View {
             .labelsHidden()
             .tint(DS.Colors.accent)
             .scaleEffect(0.8)
-            .help("Let Monkeybot drive Chrome for you via voice")
+            .help("Let Monkeybot drive your Mac apps for you via voice")
             .pointerCursor()
         }
         .padding(.vertical, 4)
@@ -564,7 +564,7 @@ struct CompanionPanelView: View {
 
             // When Monkeybot drives Chrome, web apps like Clay automate far more
             // reliably if Chrome is allowed to receive JavaScript from Apple Events.
-            Text("Web apps (Clay): enable Chrome ▸ View ▸ Developer ▸ Allow JavaScript from Apple Events for reliable automation.")
+            Text("Works best on native Mac apps. For web apps in Chrome, also enable View ▸ Developer ▸ Allow JavaScript from Apple Events.")
                 .font(.system(size: 10))
                 .foregroundColor(DS.Colors.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

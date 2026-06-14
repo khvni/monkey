@@ -660,6 +660,11 @@ final class CompanionManager: ObservableObject {
         // idle when the run ends (success, stop, limit, or failure).
         voiceState = .processing
 
+        // Restore Clicky's always-spoken contract: a quick spoken ack so the
+        // operator hears the agent take the task (the agent path was previously mute).
+        elevenLabsTTSClient.stopPlayback()
+        Task { [weak self] in try? await self?.elevenLabsTTSClient.speakText("On it.") }
+
         currentResponseTask = Task { [weak self] in
             // Let any prior run unwind fully so the loop's state/stopRequested
             // are not mutated by two concurrent runs.
@@ -668,6 +673,13 @@ final class CompanionManager: ObservableObject {
             await monkeyAgentLoop.run(task: transcript, voiceTranscript: transcript)
             guard let self, !Task.isCancelled else { return }
             self.voiceState = .idle
+            // Speak the outcome — done summary, pending question, or failure —
+            // so the run is never silent end-to-end (Clicky parity).
+            let endState = monkeyAgentLoop.state
+            let spoken = endState.pendingUserQuestion ?? endState.failureMessage ?? endState.lastActionSummary
+            if !spoken.isEmpty {
+                try? await self.elevenLabsTTSClient.speakText(spoken)
+            }
         }
     }
 

@@ -130,6 +130,12 @@ final class MonkeyAgentLoop: ObservableObject {
         browserGroundingActive = false
         cuaRecordingAttempted = false
 
+        // Show cua's per-session agent cursor on screen for the whole run, so the
+        // user can SEE where Monkey is acting (Clicky-style on-screen feedback).
+        // Removed automatically when the run ends, regardless of how it exits.
+        await cuaDriverClient.startSession("monkey")
+        defer { Task { [cuaDriverClient] in await cuaDriverClient.endSession() } }
+
         let traceSlug = Self.makeTraceSlug(fromTask: task)
         let traceRecorder = MonkeyTraceRecorder(
             task: task,
@@ -169,17 +175,17 @@ final class MonkeyAgentLoop: ObservableObject {
             failureMessage: nil
         )
 
-        // 1. Find the frontmost Google Chrome window and bring it to front.
+        // 1. Find the frontmost user app window (any desktop app) and bring it to front.
         let targetWindow: CuaWindow
         do {
-            guard let chromeWindow = try await locateFrontmostChromeWindow() else {
+            guard let pickedWindow = try await locateTargetWindow() else {
                 await surfaceUserQuestion(
-                    "I could not find an open Google Chrome window. Please open Chrome and try again.",
+                    "I couldn't find an app window to act on. Open the app you want me to use, bring it to the front, and try again.",
                     recorder: traceRecorder
                 )
                 return
             }
-            targetWindow = chromeWindow
+            targetWindow = pickedWindow
         } catch {
             await finishWithFailure(
                 "Failed to list windows: \(Self.describe(error))",
@@ -484,53 +490,44 @@ final class MonkeyAgentLoop: ObservableObject {
     ///     (a real browser frame, not a helper), and among those pick the
     ///     largest by area.
     ///  4. Fall back to the largest Chrome window overall.
-    private func locateFrontmostChromeWindow() async throws -> CuaWindow? {
+    private func locateTargetWindow() async throws -> CuaWindow? {
         let windows = try await cuaDriverClient.listWindows()
-        return Self.selectTargetWindow(from: windows)
+        let selfPid = Int(ProcessInfo.processInfo.processIdentifier)
+        return Self.selectTargetWindow(from: windows, excludingPid: selfPid)
     }
 
-    /// Pure, side-effect-free window-selection heuristic extracted from
-    /// `locateFrontmostChromeWindow()` so it can be unit-tested directly.
-    /// Same priority order:
-    ///  1. Keep only Google Chrome windows.
-    ///  2. Strongly prefer the window whose title mentions the demo target
-    ///     ("Clay") so a multi-window setup lands on the right tab — among
-    ///     those prefer an on-screen window first (so a stale/off-screen
-    ///     duplicate can't win), then break ties by largest area.
-    ///  3. Otherwise prefer on-screen windows that have a non-empty title
-    ///     (a real browser frame, not a helper), and among those pick the
-    ///     largest by area.
-    ///  4. Fall back to the largest Chrome window overall.
-    ///  5. nil when there are no Chrome windows at all.
-    static func selectTargetWindow(from windows: [CuaWindow]) -> CuaWindow? {
-        let chromeWindows = windows.filter {
-            $0.appName.localizedCaseInsensitiveContains("Chrome")
-        }
-        if chromeWindows.isEmpty { return nil }
-
+    /// Pure, side-effect-free window-selection heuristic. App-AGNOSTIC: Monkey is a
+    /// desktop computer-use agent (a tier above browser agents), so it targets the
+    /// frontmost USER app window — native macOS apps (Notes, System Settings, Mail,
+    /// Finder) or a browser — NOT just Chrome.
+    ///  1. Exclude our own UI (by pid) and system/menu surfaces — the agent must
+    ///     never drive itself.
+    ///  2. Keep on-screen windows with a real (non-empty) title that are big enough
+    ///     to be an app's main window (drops tiny off-screen helper windows).
+    ///  3. Pick the largest such window — the user brings their target app forward
+    ///     before speaking, and its main window is the biggest thing on screen.
+    ///  4. nil when no suitable app window is found.
+    static func selectTargetWindow(from windows: [CuaWindow], excludingPid selfPid: Int = 0) -> CuaWindow? {
         func area(_ window: CuaWindow) -> Double { window.bounds.width * window.bounds.height }
 
-        // 2. Title mentions the demo target — prefer an on-screen window first
-        //    (so a stale/off-screen duplicate "clay" window can't win over the
-        //    visible one), then break ties by largest area.
-        let clayWindows = chromeWindows
-            .filter { $0.title.localizedCaseInsensitiveContains("clay") }
-            .sorted { lhsWindow, rhsWindow in
-                if lhsWindow.isOnScreen != rhsWindow.isOnScreen {
-                    return lhsWindow.isOnScreen
-                }
-                return area(lhsWindow) > area(rhsWindow)
-            }
-        if let clayWindow = clayWindows.first { return clayWindow }
+        // Our own app + the driver + system/menu surfaces are never valid targets.
+        let excludedApps = ["Monkey", "Clicky", "CuaDriver", "WindowServer", "Window Server",
+                            "Dock", "Control Center", "Notification Center", "Spotlight", "Screenshot"]
 
-        // 3. On-screen real browser frames (non-empty title), largest first.
-        let onScreenTitled = chromeWindows
-            .filter { $0.isOnScreen && !$0.title.trimmingCharacters(in: .whitespaces).isEmpty }
-            .sorted { area($0) > area($1) }
-        if let bestVisible = onScreenTitled.first { return bestVisible }
-
-        // 4. Last resort: the largest Chrome window of any kind.
-        return chromeWindows.sorted { area($0) > area($1) }.first
+        let candidates = windows.filter { window in
+            window.pid != selfPid
+                && window.isOnScreen
+                && !window.title.trimmingCharacters(in: .whitespaces).isEmpty
+                && !excludedApps.contains(where: { window.appName.localizedCaseInsensitiveContains($0) })
+                && area(window) >= 120_000   // ~a real main window, not a helper
+        }
+        // Frontmost window wins (highest z-index = what the user just had focused);
+        // largest area breaks ties. Monkey never steals focus, so the frontmost
+        // non-self window is the app the user pointed at before speaking.
+        return candidates.sorted { lhs, rhs in
+            if lhs.zIndex != rhs.zIndex { return lhs.zIndex > rhs.zIndex }
+            return area(lhs) > area(rhs)
+        }.first
     }
 
     /// Performs the real macOS window raise the cua no-op can't. Best-effort:

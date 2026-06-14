@@ -37,6 +37,8 @@ struct CuaWindow: Codable {
     let pid: Int
     let windowId: Int
     let isOnScreen: Bool
+    /// Stacking order from WindowServer — higher = closer to the front.
+    let zIndex: Int
     let bounds: CGRect
 
     enum CodingKeys: String, CodingKey {
@@ -45,6 +47,7 @@ struct CuaWindow: Codable {
         case pid
         case windowId = "window_id"
         case isOnScreen = "is_on_screen"
+        case zIndex = "z_index"
         case bounds
     }
 
@@ -64,6 +67,7 @@ struct CuaWindow: Codable {
         self.pid = try container.decode(Int.self, forKey: .pid)
         self.windowId = try container.decode(Int.self, forKey: .windowId)
         self.isOnScreen = (try? container.decode(Bool.self, forKey: .isOnScreen)) ?? false
+        self.zIndex = (try? container.decode(Int.self, forKey: .zIndex)) ?? 0
         let rawBounds = try container.decode(RawBounds.self, forKey: .bounds)
         self.bounds = CGRect(
             x: rawBounds.x,
@@ -80,6 +84,7 @@ struct CuaWindow: Codable {
         try container.encode(pid, forKey: .pid)
         try container.encode(windowId, forKey: .windowId)
         try container.encode(isOnScreen, forKey: .isOnScreen)
+        try container.encode(zIndex, forKey: .zIndex)
         let rawBounds = RawBounds(
             x: bounds.origin.x,
             y: bounds.origin.y,
@@ -145,8 +150,26 @@ final class CuaDriverClient {
     /// Absolute path to the resolved `cua-driver` binary.
     let binaryPath: String
 
+    /// When set, every `call` auto-includes this session id so cua renders its
+    /// per-session on-screen agent cursor (visible feedback during an agent run).
+    var activeSession: String?
+
     init(binaryPath: String) {
         self.binaryPath = binaryPath
+    }
+
+    /// Declares a cua session (shows the agent cursor) and routes all subsequent
+    /// calls through it. Best-effort.
+    func startSession(_ id: String) async {
+        activeSession = id
+        _ = try? await call(tool: "start_session", json: ["session": id])
+    }
+
+    /// Ends the active cua session (removes the agent cursor). Best-effort.
+    func endSession() async {
+        guard let id = activeSession else { return }
+        _ = try? await call(tool: "end_session", json: ["session": id])
+        activeSession = nil
     }
 
     // MARK: Binary location (4-path search)
@@ -502,6 +525,8 @@ final class CuaDriverClient {
     /// SINGLE positional argument, returning the raw stdout bytes for decoding.
     /// Throws `CuaDriverError.callFailed` (surfacing stderr) on a non-zero exit.
     private func call(tool: String, json: [String: Any], timeout: TimeInterval = 30) async throws -> Data {
+        var json = json
+        if let activeSession, json["session"] == nil { json["session"] = activeSession }
         let jsonArgument = try Self.compactJSONString(from: json)
         let result = try await runProcess(arguments: ["call", tool, jsonArgument], timeout: timeout)
 
