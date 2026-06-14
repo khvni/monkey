@@ -10,6 +10,9 @@
  * labelled field in the active view, so the CRM form can be redesigned freely.
  */
 (function () {
+  // Bare mode: skip the in-page agent/cursor/bar entirely so an EXTERNAL driver
+  // (the local cua agent) can operate a clean CRM with its own on-screen cursor.
+  if (/[?&]bare=1/.test(location.search)) return;
   const WORKER = "https://clicky-proxy.byalikhani.workers.dev/chat";
   const MODEL = "claude-sonnet-4-6";
   const MAX_STEPS = 16;
@@ -30,21 +33,40 @@
   #mb-bubble.show{opacity:1;transform:translateY(0) scale(1)}
   #mb-bubble.coach{background:#0e1116;border:1px solid #2dd4bf;box-shadow:0 14px 34px -8px rgba(45,212,191,.5)}
   #mb-bubble .lead{display:block;font-size:11px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;opacity:.8;margin-bottom:3px}
-  #mb-bar{position:fixed;z-index:10002;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;
-    padding:10px;border-radius:16px;background:rgba(16,19,26,.94);backdrop-filter:blur(16px);border:1px solid #2c3644;
-    box-shadow:0 24px 60px -12px rgba(0,0,0,.7);width:min(760px,94vw)}
-  #mb-bar .tag{display:flex;align-items:center;gap:7px;font:700 12.5px -apple-system,sans-serif;color:#aab8ff;padding:0 6px 0 4px;flex-shrink:0}
-  #mb-bar .tag .d{width:8px;height:8px;border-radius:50%;background:#6e8bff;box-shadow:0 0 10px #6e8bff}
-  #mb-bar input{flex:1;min-width:60px;background:#171c25;border:1px solid #222a36;color:#eef1f6;border-radius:10px;
-    padding:9px 12px;font:14px -apple-system,sans-serif;outline:none}
-  #mb-bar input:focus{border-color:#6e8bff;box-shadow:0 0 0 3px rgba(110,139,255,.22)}
-  #mb-bar button{border:none;border-radius:10px;padding:9px 16px;font:700 13.5px -apple-system,sans-serif;cursor:pointer;flex-shrink:0}
-  #mb-run{background:linear-gradient(145deg,#6e8bff,#8a6bff);color:#fff}
-  #mb-run:hover{filter:brightness(1.08)} #mb-run:disabled{opacity:.5;cursor:default}
-  #mb-coach{background:#171c25;color:#5eead4;border:1px solid #2dd4bf!important}
-  #mb-mic{background:#171c25;color:#aab8ff;border:1px solid #2c3644!important}
-  #mb-mic.on{background:#f87171;color:#fff;border-color:#f87171!important;animation:micpulse 1s ease infinite}
-  @keyframes micpulse{0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,.5)}50%{box-shadow:0 0 0 7px rgba(248,113,113,0)}}
+  /* Clicky form factor: a quiet notch at top-center that drops a clean panel on hover */
+  #mb-dock{position:fixed;z-index:10002;top:0;left:50%;transform:translateX(-50%);
+    display:flex;flex-direction:column;align-items:center;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+  #mb-notch{display:flex;align-items:center;gap:8px;height:28px;padding:0 13px;
+    background:#0b0d11;color:#e9edf5;border:1px solid #1b212b;border-top:none;
+    border-radius:0 0 12px 12px;box-shadow:0 6px 18px -8px rgba(0,0,0,.6)}
+  #mb-notch .mk{width:14px;height:14px;display:block}
+  #mb-notch .nm{font-size:12px;font-weight:600;letter-spacing:-.1px}
+  #mb-notch .st{width:6px;height:6px;border-radius:50%;background:#39414f;transition:background .2s,box-shadow .2s}
+  #mb-dock.busy #mb-notch .st{background:#6e8bff;box-shadow:0 0 8px #6e8bff}
+  #mb-dock.listening #mb-notch .st{background:#f87171;box-shadow:0 0 8px #f87171}
+  #mb-panel{width:380px;max-width:92vw;margin-top:7px;background:#0e1116;border:1px solid #1b212b;
+    border-radius:14px;box-shadow:0 30px 70px -18px rgba(0,0,0,.8);overflow:hidden;
+    opacity:0;transform:translateY(-10px) scale(.985);transform-origin:top center;pointer-events:none;max-height:0;
+    transition:opacity .2s ease,transform .22s cubic-bezier(.2,.7,.2,1),max-height .22s ease}
+  #mb-dock.open #mb-panel{opacity:1;transform:none;pointer-events:auto;max-height:360px}
+  #mb-panel .ph{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #171c25}
+  #mb-panel .ph .nm{font-size:13px;font-weight:600;color:#e9edf5}
+  #mb-panel .ph .status{margin-left:auto;font-size:11.5px;color:#7a8699}
+  #mb-panel .pbody{padding:13px 16px 15px;display:flex;flex-direction:column;gap:9px}
+  #mb-panel .lbl{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#69748a}
+  #mb-panel input{width:100%;background:#161b24;border:1px solid #232b38;color:#eef1f6;border-radius:9px;
+    padding:9px 11px;font:13.5px -apple-system,sans-serif;outline:none;transition:border-color .15s,box-shadow .15s}
+  #mb-panel input:focus{border-color:#6e8bff;box-shadow:0 0 0 3px rgba(110,139,255,.2)}
+  #mb-panel input::placeholder{color:#5b6678}
+  #mb-panel .rowbtns{display:flex;gap:8px;margin-top:1px}
+  #mb-panel button{border:none;border-radius:9px;padding:9px 14px;font:600 13px -apple-system,sans-serif;cursor:pointer;transition:background .12s,filter .12s}
+  #mb-run{flex:1;background:#6e8bff;color:#fff}#mb-run:hover{background:#5a79f5}#mb-run:disabled{opacity:.5;cursor:default}
+  #mb-mic{background:#161b24;color:#aab8ff;border:1px solid #232b38}
+  #mb-mic.on{background:#f87171;color:#fff;animation:micpulse 1s ease infinite}
+  #mb-coach{width:100%;background:#161b24;color:#7fe7d6;border:1px solid #1f3b3a}#mb-coach:hover{filter:brightness(1.1)}
+  #mb-panel .divider{height:1px;background:#171c25;margin:3px 0 1px}
+  @keyframes micpulse{0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,.5)}50%{box-shadow:0 0 0 6px rgba(248,113,113,0)}}
   .mb-focus{box-shadow:0 0 0 3px rgba(110,139,255,.5)!important;border-color:#6e8bff!important;transition:box-shadow .15s}
   `;
   const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
@@ -55,14 +77,51 @@
   document.body.appendChild(cursor);
   const bubble = document.createElement("div"); bubble.id = "mb-bubble"; document.body.appendChild(bubble);
 
-  const bar = document.createElement("div"); bar.id = "mb-bar";
-  bar.innerHTML = `<span class="tag"><span class="d"></span>Monkeybot</span>
-    <input id="mb-task" placeholder="Give Monkeybot a task…" value="Create a deal: Acme Corp annual renewal, $48,000, owner Sam Chen, stage Qualified to buy, close 09/30/2026, type Renewal.">
-    <button id="mb-run">Run</button>
-    <input id="mb-coachin" placeholder="Coach it (e.g. renewals are always High priority + add a follow-up task)…" style="flex:.9">
-    <button id="mb-coach">Teach</button>
-    <button id="mb-mic" title="Hold to talk — or hold Ctrl+Option">Hold to talk</button>`;
-  document.body.appendChild(bar);
+  const MK = '<svg class="mk" width="14" height="14" viewBox="0 0 26 32"><path d="M2 1.5 L2 24 L8.4 18 L13 29 L17 27.3 L12.4 16.3 L21 16.3 Z" fill="#6e8bff" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+  const dock = document.createElement("div"); dock.id = "mb-dock";
+  dock.innerHTML = `
+    <div id="mb-notch">${MK}<span class="nm">Monkeybot</span><span class="st"></span></div>
+    <div id="mb-panel">
+      <div class="ph">${MK}<span class="nm">Monkeybot</span><span class="status" id="mb-status">Idle</span></div>
+      <div class="pbody">
+        <div class="lbl">Task</div>
+        <input id="mb-task" placeholder="Tell Monkeybot what to do…" value="Create a deal: Acme Corp annual renewal, $48,000, owner Sam Chen, stage Qualified to buy, close 09/30/2026, type Renewal.">
+        <div class="rowbtns"><button id="mb-run">Run</button><button id="mb-mic" title="Hold to talk — or hold Ctrl+Option">Hold to talk</button></div>
+        <div class="divider"></div>
+        <div class="lbl">Coach — plain English</div>
+        <input id="mb-coachin" placeholder="e.g. renewals are always High priority + add a follow-up task">
+        <button id="mb-coach">Teach</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dock);
+
+  // Clicky dropdown behavior: drop the panel on hover/focus; collapse when idle + unfocused.
+  let dockHover = false, dockFocus = false, listening = false;
+  function syncDock() {
+    const el = document.getElementById("mb-dock"); if (!el) return;
+    const open = dockHover || dockFocus || running || listening;
+    el.classList.toggle("open", open);
+    el.classList.toggle("busy", !!running);
+    el.classList.toggle("listening", listening);
+    // drive the dropdown via inline styles (robust against CSS descendant-rule quirks)
+    const p = document.getElementById("mb-panel");
+    if (p) {
+      p.style.maxHeight = open ? "360px" : "0px";
+      p.style.opacity = open ? "1" : "0";
+      p.style.transform = open ? "none" : "translateY(-10px) scale(.985)";
+      p.style.pointerEvents = open ? "auto" : "none";
+    }
+    const s = document.getElementById("mb-status");
+    if (s) s.textContent = running ? "Running…" : (listening ? "Listening…" : "Idle");
+  }
+  syncDock();
+  dock.addEventListener("mouseenter", () => { dockHover = true; syncDock(); });
+  dock.addEventListener("mouseleave", () => { dockHover = false; syncDock(); });
+  ["mb-task", "mb-coachin"].forEach((id) => {
+    const e = document.getElementById(id);
+    e.addEventListener("focus", () => { dockFocus = true; syncDock(); });
+    e.addEventListener("blur", () => { dockFocus = false; setTimeout(syncDock, 150); });
+  });
 
   let cursorX = -200, cursorY = -200, running = false;
   const coaching = [];
@@ -254,7 +313,7 @@ Rules:
 
   // ---------- the real loop ----------
   async function run() {
-    if (running) return; running = true;
+    if (running) return; running = true; syncDock();
     const runBtn = $("#mb-run"); runBtn.disabled = true; runBtn.textContent = "Running…";
     const task = $("#mb-task").value.trim();
     try {
@@ -267,7 +326,7 @@ Rules:
         if (action.action === "done") { say(action.summary || "Done."); break; }
         await sleep(350);
       }
-    } finally { running = false; runBtn.disabled = false; runBtn.textContent = "Run"; }
+    } finally { running = false; runBtn.disabled = false; runBtn.textContent = "Run"; syncDock(); }
   }
   function teach() {
     const c = $("#mb-coachin").value.trim(); if (!c) return;
@@ -287,8 +346,8 @@ Rules:
     if (!SR || recognizing) return;
     recog = new SR(); recog.lang = "en-US"; recog.interimResults = false; recog.maxAlternatives = 1;
     recog.onresult = (e) => handleVoice(e.results[0][0].transcript);
-    recog.onend = () => { recognizing = false; $("#mb-mic")?.classList.remove("on"); };
-    try { recog.start(); recognizing = true; $("#mb-mic")?.classList.add("on"); } catch (_) {}
+    recog.onend = () => { recognizing = false; listening = false; $("#mb-mic")?.classList.remove("on"); syncDock(); };
+    try { recog.start(); recognizing = true; listening = true; $("#mb-mic")?.classList.add("on"); syncDock(); } catch (_) {}
   }
   function stopPTT() { if (recog && recognizing) { try { recog.stop(); } catch (_) {} } }
   // Hold Ctrl+Option to talk (mirrors the Swift app's push-to-talk) …
