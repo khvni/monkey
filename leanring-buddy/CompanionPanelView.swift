@@ -110,7 +110,7 @@ struct CompanionPanelView: View {
                     .frame(width: 8, height: 8)
                     .shadow(color: statusDotColor.opacity(0.6), radius: 4)
 
-                Text("Clicky")
+                Text("Monkey")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(DS.Colors.textPrimary)
             }
@@ -156,7 +156,7 @@ struct CompanionPanelView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(DS.Colors.textSecondary)
 
-                Text("Grant all four below to use Clicky. Clicky only takes a screenshot when you press the hotkey — nothing runs in the background.")
+                Text("Grant all four below to use Monkey. Monkey only takes a screenshot when you press the hotkey — nothing runs in the background.")
                     .font(.system(size: 11))
                     .foregroundColor(DS.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -480,7 +480,7 @@ struct CompanionPanelView: View {
                     .foregroundColor(DS.Colors.textTertiary)
                     .frame(width: 16)
 
-                Text("Show Clicky")
+                Text("Show Monkey")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(DS.Colors.textSecondary)
             }
@@ -715,7 +715,7 @@ struct CompanionPanelView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "power")
                         .font(.system(size: 11, weight: .medium))
-                    Text("Quit Clicky")
+                    Text("Quit Monkey")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundColor(DS.Colors.textTertiary)
